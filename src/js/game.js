@@ -8,6 +8,7 @@ import { initSpeech } from './speech';
 import { save, load } from './storage';
 import { ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, CHARSET_SIZE, initCharset, renderText, initTextBuffer, clearTextBuffer, renderAnimatedText } from './text';
 import { getRandSeed, setRandSeed, lerp, loadImg } from './utils';
+import { CELL_SIZE, sampleMaterial, sampleDust, materialColor, dustColor } from './terrain';
 import TILESET from '../img/tileset.webp';
 
 
@@ -26,9 +27,7 @@ let screen = TITLE_SCREEN;
 const NORMALIZE_DIAGONAL = Math.cos(Math.PI / 4);
 const TIME_TO_FULL_SPEED = 150;                // in millis, duration till going full speed in any direction
 
-let countdown; // in seconds
 let hero;
-let entities;
 
 let speak;
 
@@ -56,24 +55,7 @@ MAP.height = 480;
 const TEXT = initTextBuffer(c, CAMERA_WIDTH, CAMERA_HEIGHT);  // text buffer
 
 
-const ATLAS = {
-  hero: {
-    move: [
-      { x: 0, y: 0, w: 16, h: 18 },
-      { x: 16, y: 0, w: 16, h: 18 },
-      { x: 32, y: 0, w: 16, h: 18 },
-      { x: 48, y: 0, w: 16, h: 18 },
-      { x: 64, y: 0, w: 16, h: 18 },
-    ],
-    speed: 100,
-  },
-  foe: {
-    move: [
-      { x: 0, y: 0, w: 16, h: 18 },
-    ],
-    speed: 0,
-  },
-};
+const ATLAS = {};
 const FRAME_DURATION = 0.1; // duration of 1 animation frame, in seconds
 let tileset;   // characters sprite, embedded as a base64 encoded dataurl by build script
 
@@ -95,23 +77,8 @@ function startGame() {
   // setRandSeed(getRandSeed());
   // if (isMonetizationEnabled()) { unlockExtraContent() }
   konamiIndex = 0;
-  countdown = 60;
   cameraX = cameraY = 0;
-  hero = createEntity('hero', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2);
-  entities = [
-    hero,
-    createEntity('foe', 10, 10),
-    createEntity('foe', 630 - 16, 10),
-    createEntity('foe', 630 - 16, 470 - 18),
-    createEntity('foe', 300, 200),
-    createEntity('foe', 400, 300),
-    createEntity('foe', 500, 400),
-    createEntity('foe', 10, 470 - 18),
-    createEntity('foe', 100, 100),
-    createEntity('foe', 100, 118),
-    createEntity('foe', 116, 118),
-    createEntity('foe', 116, 100),
-  ];
+  hero = {};
   renderMap();
   screen = GAME_SCREEN;
 };
@@ -368,24 +335,6 @@ function processInputs() {
 
 function update() {
   processInputs();
-
-  switch (screen) {
-    case GAME_SCREEN:
-      countdown -= elapsedTime;
-      if (countdown < 0) {
-        screen = END_SCREEN;
-      }
-      entities.forEach(updateEntity);
-      entities.slice(1).forEach((entity) => {
-        const test = testAABBCollision(hero, entity);
-        if (test.collide) {
-          correctAABBCollision(hero, entity, test);
-        }
-      });
-      constrainToViewport(hero);
-      updateCameraWindow();
-      break;
-  }
 };
 
 // RENDER HANDLERS
@@ -409,8 +358,7 @@ function render() {
 
   switch (screen) {
     case TITLE_SCREEN:
-      BUFFER_CTX.fillStyle = '#fff';
-      BUFFER_CTX.fillRect(0, 0, BUFFER.width, BUFFER.height);
+      BUFFER_CTX.drawImage(MAP, 0, 0, BUFFER.width, BUFFER.height);
       renderText('title screen', CHARSET_SIZE, CHARSET_SIZE);
       renderText(isMobile ? 'tap to start' : 'press any key', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2, ALIGN_CENTER);
       if (konamiIndex === konamiCode.length) {
@@ -421,10 +369,7 @@ function render() {
       // clear backbuffer by drawing static map elements
       // TODO could also just draw the camera visible portion of the map
       BUFFER_CTX.drawImage(MAP, 0, 0, BUFFER.width, BUFFER.height);
-      // TODO could also skip every entity not in the camera visible portion
-      entities.forEach(entity => renderEntity(entity));
       renderText('game screen', CHARSET_SIZE, CHARSET_SIZE);
-      renderCountdown();
       // debugCameraWindow();
       // uncomment to debug mobile input handlers
       // renderDebugTouch();
@@ -438,12 +383,6 @@ function render() {
   }
 
   blit();
-};
-
-function renderCountdown() {
-  const minutes = ((countdown + 1) / 60) | 0;  // | 0 is the same as Math.trunc to get the integer part
-  const seconds = (countdown + 1 - minutes * 60) | 0; // +1 to round up to the next second e.g. 2.7s is still 3s left until 2.0s
-  renderText(`${minutes}:${seconds <= 9 ? '0' : ''}${seconds}`, CAMERA_WIDTH - CHARSET_SIZE, CHARSET_SIZE, ALIGN_RIGHT);
 };
 
 function renderEntity(entity, ctx = BUFFER_CTX) {
@@ -463,9 +402,16 @@ function debugCameraWindow() {
 };
 
 function renderMap() {
-  MAP_CTX.fillStyle = '#fff';
-  MAP_CTX.fillRect(0, 0, MAP.width, MAP.height);
-  // TODO cache map by rendering static entities on the MAP canvas
+  for (let y = 0; y < MAP.height; y += CELL_SIZE) {
+    for (let x = 0; x < MAP.width; x += CELL_SIZE) {
+      MAP_CTX.fillStyle = materialColor(sampleMaterial(x, y));
+      MAP_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+      if (sampleDust(x, y)) {
+        MAP_CTX.fillStyle = dustColor();
+        MAP_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+      }
+    }
+  }
 };
 
 // LOOP HANDLERS
@@ -503,6 +449,7 @@ onload = async (e) => {
   await initCharset();
   tileset = await loadImg(TILESET);
   // speak = await initSpeech();
+  renderMap();
 
   toggleLoop(true);
 };
