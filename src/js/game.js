@@ -35,23 +35,23 @@ let speak;
 
 let cameraX = 0;                        // camera/viewport position in map
 let cameraY = 0;
-const CAMERA_WIDTH = 320;               // camera/viewport size
-const CAMERA_HEIGHT = 240;
+const CAMERA_WIDTH = 1280;              // camera/viewport size
+const CAMERA_HEIGHT = 960;
 // camera-window & edge-snapping settings
-const CAMERA_WINDOW_X = 100;
-const CAMERA_WINDOW_Y = 50;
+const CAMERA_WINDOW_X = 400;
+const CAMERA_WINDOW_Y = 200;
 const CAMERA_WINDOW_WIDTH = CAMERA_WIDTH - 2*CAMERA_WINDOW_X;
 const CAMERA_WINDOW_HEIGHT = CAMERA_HEIGHT - 2*CAMERA_WINDOW_Y;
 
 const CTX = c.getContext('2d');         // visible canvas
 const BUFFER = c.cloneNode();           // backbuffer
 const BUFFER_CTX = BUFFER.getContext('2d');
-BUFFER.width = 640;                     // backbuffer size
-BUFFER.height = 480;
+BUFFER.width = 2560;                    // backbuffer size
+BUFFER.height = 1920;
 const MAP = c.cloneNode();              // static elements of the map/world cached once
 const MAP_CTX = MAP.getContext('2d');
-MAP.width = 640;                        // map size, same as backbuffer
-MAP.height = 480;
+MAP.width = 2560;                       // map size, same as backbuffer
+MAP.height = 1920;
 const TEXT = initTextBuffer(c, CAMERA_WIDTH, CAMERA_HEIGHT);  // text buffer
 
 
@@ -407,7 +407,7 @@ function renderMap() {
       MAP_CTX.fillStyle = materialColor(sampleMaterial(x, y));
       MAP_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
       if (sampleDust(x, y)) {
-        MAP_CTX.fillStyle = dustColor();
+        MAP_CTX.fillStyle = dustColor(x, y);
         MAP_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
       }
     }
