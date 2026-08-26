@@ -14,22 +14,29 @@ const hash2D = (x, y) => {
 };
 
 // scatter one jittered blob (center + radius) per grid cell, deterministic
-// from its coordinates; `salt` decorrelates independent blob fields (rock vs dust)
-const blobAt = (gx, gy, cellSize, minRadius, maxRadius, salt) => ({
-  x: (gx + hash2D(gx, gy + salt)) * cellSize,
-  y: (gy + hash2D(gx + salt, gy)) * cellSize,
-  r: minRadius + hash2D(gx + salt, gy + salt) * (maxRadius - minRadius),
-});
+// from its coordinates; `salt` decorrelates independent blob fields (rock vs
+// dust). `chance` (see macro pattern pass below) lets a candidate be skipped
+// entirely so a field's overall density can be dialed down; null means "no
+// blob here".
+const blobAt = (gx, gy, cellSize, minRadius, maxRadius, salt, chance) => {
+  if (hash2D(gx + salt + 31337, gy + salt + 31337) >= chance) return null;
+  return {
+    x: (gx + hash2D(gx, gy + salt)) * cellSize,
+    y: (gy + hash2D(gx + salt, gy)) * cellSize,
+    r: minRadius + hash2D(gx + salt, gy + salt) * (maxRadius - minRadius),
+  };
+};
 
 // how deep inside the nearest blob (x,y) falls: 0 at/outside its edge, 1 at its
 // center. Scans the surrounding grid cells since a blob can spill into its
 // neighbors. Overlapping blobs merge into bigger, irregular rounded clusters.
-const blobField = (x, y, cellSize, minRadius, maxRadius, salt) => {
+const blobField = (x, y, cellSize, minRadius, maxRadius, salt, chance = 1) => {
   const gx = Math.floor(x / cellSize), gy = Math.floor(y / cellSize);
   let best = 0;
   for (let ny = gy - 1; ny <= gy + 1; ny++) {
     for (let nx = gx - 1; nx <= gx + 1; nx++) {
-      const b = blobAt(nx, ny, cellSize, minRadius, maxRadius, salt);
+      const b = blobAt(nx, ny, cellSize, minRadius, maxRadius, salt, chance);
+      if (!b) continue;
       const depth = 1 - Math.hypot(x - b.x, y - b.y) / b.r;
       if (depth > best) best = depth;
     }
@@ -37,11 +44,45 @@ const blobField = (x, y, cellSize, minRadius, maxRadius, salt) => {
   return best;
 };
 
+// --- macro pattern pass -------------------------------------------------
+// the map is first divided into large sections; each section deterministically
+// rolls one of a few density patterns, giving direct control over how
+// obstacle-heavy an area is instead of leaving density fully emergent from
+// the blob field alone (Spelunky-style room-category pass, applied to a
+// continuous field instead of discrete rooms)
+export const CLEAR = 0;
+export const SPARSE = 1;
+export const DENSE = 2;
+export const FILLED = 3;
+
+// probability of picking each pattern; must sum to 1
+const PATTERN_WEIGHTS = [0.50, 0.25, 0.15, 0.10];
+
+// probability that a rock blob candidate actually spawns, per pattern
+const PATTERN_BLOB_CHANCE = [0, 0.3, 0.9, 1];
+
+const SECTION_SIZE = 480; // px per macro section
+
+const sectionPattern = (sx, sy) => {
+  const roll = hash2D(sx + 99991, sy + 99991);
+  let acc = 0;
+  for (let p = 0; p < PATTERN_WEIGHTS.length; p++) {
+    acc += PATTERN_WEIGHTS[p];
+    if (roll < acc) return p;
+  }
+  return PATTERN_WEIGHTS.length - 1;
+};
+
 const ROCK_CELL = 120; // px per grid cell: one candidate boulder per cell
 const ROCK_MIN_R = 24;
 const ROCK_MAX_R = 56;
 
-export const sampleMaterial = (x, y) => blobField(x, y, ROCK_CELL, ROCK_MIN_R, ROCK_MAX_R, 0) > 0 ? CLAY : SAND;
+export const sampleMaterial = (x, y) => {
+  const pattern = sectionPattern(Math.floor(x / SECTION_SIZE), Math.floor(y / SECTION_SIZE));
+  if (pattern === CLEAR) return SAND;
+  if (pattern === FILLED) return CLAY;
+  return blobField(x, y, ROCK_CELL, ROCK_MIN_R, ROCK_MAX_R, 0, PATTERN_BLOB_CHANCE[pattern]) > 0 ? CLAY : SAND;
+};
 
 const DUST_CELL = 90;
 const DUST_MIN_R = 16;
