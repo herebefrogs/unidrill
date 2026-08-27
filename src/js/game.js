@@ -44,6 +44,9 @@ const CAMERA_WIDTH = 1280;              // camera/viewport size
 const CAMERA_HEIGHT = 960;
 const SURFACE_Y = CAMERA_HEIGHT / 2;    // world y of ground level; hero starts here, underground gen starts below it
 const SKY_COLOR = '#9fd8ff';
+// underground-y (SURFACE_Y-relative, see paintRow) that MAP buffer row 0
+// currently represents; scrollMap() advances this as the buffer gets paged
+let mapOffset = 0;
 
 hero = {
   x: CAMERA_WIDTH / 2 - HERO_W / 2,
@@ -94,6 +97,7 @@ function startGame() {
   // if (isMonetizationEnabled()) { unlockExtraContent() }
   konamiIndex = 0;
   cameraX = cameraY = 0;
+  mapOffset = 0;
   hero = {
     x: CAMERA_WIDTH / 2 - HERO_W / 2,
     y: SURFACE_Y - HERO_H,          // feet on the ground, not center
@@ -368,19 +372,44 @@ function update() {
 };
 
 function moveHero() {
-  // temporary: no scrolling buffer yet (TODO.md item 3), hero clamped
-  // directly to the static map bounds.
-  hero.y = Math.max(0, Math.min(MAP.height - hero.h,
-    hero.y + hero.velY * HERO_SPEED * elapsedTime));
-  depth = Math.max(0, Math.round(hero.y + hero.h - SURFACE_Y));
+  // no map-bounds clamp here: depth is unbounded, the buffer scrolls to
+  // keep up (see scrollMap). Moving further up than the surface is already
+  // blocked in processInputs() by gating hero.moveUp on depth > 0.
+  hero.y += hero.velY * HERO_SPEED * elapsedTime;
+  depth = Math.max(0, Math.round(hero.y + hero.h - SURFACE_Y + mapOffset));
 }
 
 // kept as its own step, decoupled from moveHero(): the camera only ever
-// reads hero.y, it never feeds back into hero's own position/clamp. This is
+// reads hero.y, it never feeds back into hero's own position. This is
 // still a temporary hard lock - smoothing/lookahead is TODO.md's last item.
 function followCamera() {
-  cameraY = Math.max(0, Math.min(MAP.height - CAMERA_HEIGHT,
-    hero.y + hero.h / 2 - CAMERA_HEIGHT / 2));
+  cameraY = hero.y + hero.h / 2 - CAMERA_HEIGHT / 2;
+  // once the camera drifts past the buffer's edge, page the buffer instead
+  // of clamping: shift its content, patch the newly exposed strip, and
+  // re-center in one jump (rather than paging every single frame) using
+  // the existing 2x buffer-vs-camera size as lookahead margin.
+  if (cameraY < 0 || cameraY > MAP.height - CAMERA_HEIGHT) {
+    const margin = (MAP.height - CAMERA_HEIGHT) / 2;
+    scrollMap(Math.round((cameraY - margin) / CELL_SIZE) * CELL_SIZE);
+  }
+}
+
+// self-blit the MAP buffer by dy px (+down/-up) and patch only the newly
+// exposed strip, instead of resampling every visible pixel every frame.
+// Keeps hero/camera pointing at the same underground spot they were before.
+function scrollMap(dy) {
+  if (!dy) return;
+  if (dy > 0) {
+    MAP_CTX.drawImage(MAP, 0, dy, MAP.width, MAP.height - dy, 0, 0, MAP.width, MAP.height - dy);
+    mapOffset += dy;
+    for (let y = MAP.height - dy; y < MAP.height; y += CELL_SIZE) paintRow(y);
+  } else {
+    MAP_CTX.drawImage(MAP, 0, 0, MAP.width, MAP.height + dy, 0, -dy, MAP.width, MAP.height + dy);
+    mapOffset += dy;
+    for (let y = 0; y < -dy; y += CELL_SIZE) paintRow(y);
+  }
+  hero.y -= dy;
+  cameraY -= dy;
 }
 
 // RENDER HANDLERS
@@ -450,16 +479,18 @@ function debugCameraWindow() {
   BUFFER_CTX.strokeRect(cameraX + CAMERA_WINDOW_X, cameraY + CAMERA_WINDOW_Y, CAMERA_WINDOW_WIDTH, CAMERA_WINDOW_HEIGHT);
 };
 
-function renderMap() {
-  MAP_CTX.fillStyle = SKY_COLOR;
-  MAP_CTX.fillRect(0, 0, MAP.width, SURFACE_Y);
-
-  for (let y = SURFACE_Y; y < MAP.height; y += CELL_SIZE) {
-    for (let x = 0; x < MAP.width; x += CELL_SIZE) {
-      MAP_CTX.fillStyle = materialColor(sampleMaterial(x, y - SURFACE_Y));
-      MAP_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
-    }
+// one CELL_SIZE-tall band of the MAP buffer, sky above ground / material
+// below - shared by the initial full paint and scrollMap's incremental one
+function paintRow(y) {
+  const underground = y - SURFACE_Y + mapOffset;
+  for (let x = 0; x < MAP.width; x += CELL_SIZE) {
+    MAP_CTX.fillStyle = underground < 0 ? SKY_COLOR : materialColor(sampleMaterial(x, underground));
+    MAP_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
   }
+};
+
+function renderMap() {
+  for (let y = 0; y < MAP.height; y += CELL_SIZE) paintRow(y);
 };
 
 // LOOP HANDLERS
