@@ -1,7 +1,13 @@
-Game Jam Boilerplate
-====================
+UniDrill Corp
+=============
 
-A small, extendable boilerplate for 2D canvas games with keyboard, mouse and touch support. It comes with a build script to watch for changes and livereload the game in your browser during development, and to package your game into a ZIP archive for gamejam submission.
+A JS13KGames 2026 entry — see `DESIGN.md`. Built on top of
+[Game Jam Boilerplate](https://github.com/herebefrogs/gamejam-boilerplate), a
+small, extendable boilerplate for 2D canvas games with keyboard, mouse and
+touch support. It comes with a build script to watch for changes and
+livereload the game in your browser during development, and to package your
+game into a ZIP archive for gamejam submission. The rest of this doc covers
+that underlying engine.
 
 Getting Started
 ---------------

@@ -520,7 +520,7 @@ function toggleLoop(value) {
 
 // the real "main" of the game
 onload = async (e) => {
-  document.title = 'Game Jam Boilerplate';
+  document.title = 'UniDrill Corp';
 
   onresize();
   //checkMonetization();
