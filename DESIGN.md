@@ -164,6 +164,11 @@ resurface and it has to stay consistent.
 
 ## Open questions
 
+- Camera tracking: as the unicorn digs, the camera should stay centered on
+  it, but a naive hard-lock reads as jittery/robotic. Worth a pass on
+  smoothing/lookahead strategies once movement exists — see
+  https://gamedesignskills.com/game-design/camera-design-2d-side-scroller-games/
+  (warning: heavy with animated gifs) for a survey of options.
 - Momentum at start: fixed amount vs. aim-and-throw (Angry Birds style)?
 - Rock deflection behavior (once rock is added) — bounce angle, momentum
   cost, or both?

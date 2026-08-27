@@ -27,6 +27,10 @@ let screen = TITLE_SCREEN;
 const NORMALIZE_DIAGONAL = Math.cos(Math.PI / 4);
 const TIME_TO_FULL_SPEED = 150;                // in millis, duration till going full speed in any direction
 
+const HERO_W = 24;                             // temporary blue square, real sprite later
+const HERO_H = 24;
+const HERO_SPEED = 200;                        // px/sec, temporary
+
 let hero;
 
 let speak;
@@ -78,7 +82,13 @@ function startGame() {
   // if (isMonetizationEnabled()) { unlockExtraContent() }
   konamiIndex = 0;
   cameraX = cameraY = 0;
-  hero = {};
+  hero = {
+    x: CAMERA_WIDTH / 2 - HERO_W / 2,
+    y: CAMERA_HEIGHT / 2 - HERO_H / 2,
+    w: HERO_W,
+    h: HERO_H,
+    velY: 0,
+  };
   renderMap();
   screen = GAME_SCREEN;
 };
@@ -335,6 +345,15 @@ function processInputs() {
 
 function update() {
   processInputs();
+
+  if (screen === GAME_SCREEN) {
+    // temporary: hard camera lock, no scrolling buffer yet (TODO.md item 3).
+    // hero stays screen-centered vertically; no horizontal scroll for now.
+    const centerY = Math.max(CAMERA_HEIGHT / 2, Math.min(MAP.height - CAMERA_HEIGHT / 2,
+      hero.y + hero.h / 2 + hero.velY * HERO_SPEED * elapsedTime));
+    hero.y = centerY - hero.h / 2;
+    cameraY = centerY - CAMERA_HEIGHT / 2;
+  }
 };
 
 // RENDER HANDLERS
@@ -369,6 +388,8 @@ function render() {
       // clear backbuffer by drawing static map elements
       // TODO could also just draw the camera visible portion of the map
       BUFFER_CTX.drawImage(MAP, 0, 0, BUFFER.width, BUFFER.height);
+      BUFFER_CTX.fillStyle = '#2255ee';
+      BUFFER_CTX.fillRect(hero.x, hero.y, hero.w, hero.h);
       renderText('game screen', CHARSET_SIZE, CHARSET_SIZE);
       // debugCameraWindow();
       // uncomment to debug mobile input handlers
