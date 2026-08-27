@@ -21,3 +21,9 @@ for the reasoning behind each of these; this is just the sequencing.
 - [ ] Rainbow dust.
 - [ ] Camera window tracking (smoothing/lookahead — see DESIGN.md's open
       question on camera tracking).
+
+## Later / revisit
+
+- [ ] Depth is currently displayed in raw pixels. Should be in meters, but we
+      don't know the px-per-meter ratio until map/viewport sizing is
+      finalized. Revisit once that's locked in.

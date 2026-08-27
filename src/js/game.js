@@ -20,7 +20,7 @@ let konamiIndex = 0;
 const TITLE_SCREEN = 0;
 const GAME_SCREEN = 1;
 const END_SCREEN = 2;
-let screen = TITLE_SCREEN;
+let screen = GAME_SCREEN; // TODO restore TITLE_SCREEN once GAME_SCREEN is further along
 
 // factor by which to reduce both velX and velY when player moving diagonally
 // so they don't seem to move faster than when traveling vertically or horizontally
@@ -32,6 +32,7 @@ const HERO_H = 24;
 const HERO_SPEED = 200;                        // px/sec, temporary
 
 let hero;
+let depth;                                     // px drilled below the surface (world-space y, until infinite scroll lands)
 
 let speak;
 
@@ -41,6 +42,17 @@ let cameraX = 0;                        // camera/viewport position in map
 let cameraY = 0;
 const CAMERA_WIDTH = 1280;              // camera/viewport size
 const CAMERA_HEIGHT = 960;
+const SURFACE_Y = CAMERA_HEIGHT / 2;    // world y of ground level; hero starts here, underground gen starts below it
+const SKY_COLOR = '#9fd8ff';
+
+hero = {
+  x: CAMERA_WIDTH / 2 - HERO_W / 2,
+  y: SURFACE_Y - HERO_H,                // feet on the ground, not center
+  w: HERO_W,
+  h: HERO_H,
+  velY: 0,
+};
+depth = 0;
 // camera-window & edge-snapping settings
 const CAMERA_WINDOW_X = 400;
 const CAMERA_WINDOW_Y = 200;
@@ -84,11 +96,12 @@ function startGame() {
   cameraX = cameraY = 0;
   hero = {
     x: CAMERA_WIDTH / 2 - HERO_W / 2,
-    y: CAMERA_HEIGHT / 2 - HERO_H / 2,
+    y: SURFACE_Y - HERO_H,          // feet on the ground, not center
     w: HERO_W,
     h: HERO_H,
     velY: 0,
   };
+  depth = 0;
   renderMap();
   screen = GAME_SCREEN;
 };
@@ -305,7 +318,9 @@ function processInputs() {
           'ArrowRight',
           'KeyD'
         );
-        hero.moveUp = isKeyDown(
+        // temporary: block moving further up once already at the surface
+        // (depth 0), until there's a reason to walk around up there
+        hero.moveUp = depth > 0 && isKeyDown(
           'ArrowUp',
           'KeyW',   // English Keyboard layout
           'KeyZ'    // French keyboard layout
@@ -347,14 +362,26 @@ function update() {
   processInputs();
 
   if (screen === GAME_SCREEN) {
-    // temporary: hard camera lock, no scrolling buffer yet (TODO.md item 3).
-    // hero stays screen-centered vertically; no horizontal scroll for now.
-    const centerY = Math.max(CAMERA_HEIGHT / 2, Math.min(MAP.height - CAMERA_HEIGHT / 2,
-      hero.y + hero.h / 2 + hero.velY * HERO_SPEED * elapsedTime));
-    hero.y = centerY - hero.h / 2;
-    cameraY = centerY - CAMERA_HEIGHT / 2;
+    moveHero();
+    followCamera();
   }
 };
+
+function moveHero() {
+  // temporary: no scrolling buffer yet (TODO.md item 3), hero clamped
+  // directly to the static map bounds.
+  hero.y = Math.max(0, Math.min(MAP.height - hero.h,
+    hero.y + hero.velY * HERO_SPEED * elapsedTime));
+  depth = Math.max(0, Math.round(hero.y + hero.h - SURFACE_Y));
+}
+
+// kept as its own step, decoupled from moveHero(): the camera only ever
+// reads hero.y, it never feeds back into hero's own position/clamp. This is
+// still a temporary hard lock - smoothing/lookahead is TODO.md's last item.
+function followCamera() {
+  cameraY = Math.max(0, Math.min(MAP.height - CAMERA_HEIGHT,
+    hero.y + hero.h / 2 - CAMERA_HEIGHT / 2));
+}
 
 // RENDER HANDLERS
 
@@ -391,6 +418,7 @@ function render() {
       BUFFER_CTX.fillStyle = '#2255ee';
       BUFFER_CTX.fillRect(hero.x, hero.y, hero.w, hero.h);
       renderText('game screen', CHARSET_SIZE, CHARSET_SIZE);
+      renderText('depth ' + depth, CAMERA_WIDTH - CHARSET_SIZE, CHARSET_SIZE, ALIGN_RIGHT);
       // debugCameraWindow();
       // uncomment to debug mobile input handlers
       // renderDebugTouch();
@@ -423,9 +451,12 @@ function debugCameraWindow() {
 };
 
 function renderMap() {
-  for (let y = 0; y < MAP.height; y += CELL_SIZE) {
+  MAP_CTX.fillStyle = SKY_COLOR;
+  MAP_CTX.fillRect(0, 0, MAP.width, SURFACE_Y);
+
+  for (let y = SURFACE_Y; y < MAP.height; y += CELL_SIZE) {
     for (let x = 0; x < MAP.width; x += CELL_SIZE) {
-      MAP_CTX.fillStyle = materialColor(sampleMaterial(x, y));
+      MAP_CTX.fillStyle = materialColor(sampleMaterial(x, y - SURFACE_Y));
       MAP_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
     }
   }
