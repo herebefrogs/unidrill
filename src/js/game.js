@@ -8,7 +8,7 @@ import { initSpeech } from './speech';
 import { save, load } from './storage';
 import { ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, CHARSET_SIZE, initCharset, renderText, initTextBuffer, clearTextBuffer, renderAnimatedText } from './text';
 import { getRandSeed, setRandSeed, lerp, loadImg } from './utils';
-import { CELL_SIZE, sampleMaterial, sampleDust, materialColor, dustColor } from './terrain';
+import { CELL_SIZE, sampleMaterial, materialColor } from './terrain';
 import TILESET from '../img/tileset.webp';
 
 
@@ -406,10 +406,6 @@ function renderMap() {
     for (let x = 0; x < MAP.width; x += CELL_SIZE) {
       MAP_CTX.fillStyle = materialColor(sampleMaterial(x, y));
       MAP_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
-      if (sampleDust(x, y)) {
-        MAP_CTX.fillStyle = dustColor(x, y);
-        MAP_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
-      }
     }
   }
 };
