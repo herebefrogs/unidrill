@@ -19,7 +19,11 @@ for the reasoning behind each of these; this is just the sequencing.
 - [x] Handle colliding with the vertical edges of the map. (Currently a
       hard clamp of `hero.x` to the viewport width in `moveHero()` — no
       horizontal camera panning yet, so viewport edge == map edge for now.)
-- [ ] Momentum / entropy / material drag.
+- [x] Momentum / entropy / material drag. Fixed launch impulse
+      (`MOMENTUM` config in game.js), decays each frame by entropy + drag
+      from the material at the drill's leading edge (`MATERIAL_DRAG` in
+      terrain.js; dug tunnel & air use the cheaper values in `MOMENTUM`).
+      Win/lose evaluated in `moveHero()` from `depth` + momentum.
 - [ ] Add ROCK as a third material. Solid and undrillable — the drill can't
       carve it. On contact it deflects the player's heading (bounce) rather
       than stopping them dead. See DESIGN.md (materials, and the rock
@@ -49,7 +53,11 @@ for the reasoning behind each of these; this is just the sequencing.
 
 ## Bugs
 
-- [ ] Player continues upward into the sky past the surface line.
+- [ ] Player continues upward into the sky past the surface line. (Moot on
+      the game screen now — the resurface win fires at `depth <= 0` before
+      the hero climbs far — but the underlying world-space surface clamp was
+      removed, so revisit if a post-win fly-up or a title-screen preview
+      needs it.)
 - [ ] In portrait screen ratio, the canvas should use the whole screen to
       show as much of the underground as possible. Revisit the locked-ratio
       logic then — it may be wrong regardless of screen orientation.

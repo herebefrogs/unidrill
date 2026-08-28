@@ -6,6 +6,12 @@ export const CLAY = 1;
 
 const MATERIAL_COLOR = ['#e0c088', '#96633c'];
 
+// deceleration (px/sec^2) the drill suffers while cutting through each
+// material - the "drag" half of the momentum loop. Parallel to
+// MATERIAL_COLOR (SAND, CLAY). Sand barely bites; clay eats momentum fast.
+// A baseline entropy term (material-independent) is added on top in game.js.
+export const MATERIAL_DRAG = [90, 300];
+
 // deterministic 2D hash, returns a value in [0, 1)
 const hash2D = (x, y) => {
   let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263);

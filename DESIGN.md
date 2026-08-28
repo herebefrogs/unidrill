@@ -18,14 +18,19 @@ the surface and a new rainbow spawns.
 Push-your-luck, one decision per second: **drill deeper for more dust, or head
 back to the surface with what you've got before you run out of momentum.**
 
-- Unicorn starts at the surface with momentum (fixed amount, or possibly
-  imparted by an aim-and-throw a la Angry Birds — **TBD**).
+- Unicorn launches from the surface with a fixed downward impulse of
+  momentum. Momentum only ever decays (drag + entropy, below); the only way
+  to top it back up is a dense dust patch.
 - The underground is **completely solid soil** — no pre-existing caves or
   tunnel network. The player carves their own path by drilling, like *Where's
   My Water* or *Roottown*'s root growth. The pleasure of the game is in
   carving the shape, not navigating existing passages.
-- Material type affects momentum: some soil types deplete it faster, others
-  deflect the unicorn (rock, once added).
+- Material type affects momentum: each material has its own drag
+  (deceleration) — sand barely bites, clay eats momentum fast — on top of a
+  small material-independent entropy that always applies underground.
+  Backtracking up an already-carved tunnel is cheap (tunnel drag + entropy
+  only), which is what makes the return trip affordable. Rock, once added,
+  deflects the unicorn instead of dragging.
 - Rainbow dust comes in sparse patches (small yield) and dense patches
   (bigger yield + temporary momentum boost).
 - Carrying more dust drains momentum faster — the deeper/greedier you go,
@@ -33,8 +38,20 @@ back to the surface with what you've got before you run out of momentum.**
 
 ## Win / lose
 
-- **Win:** resurface. Dust carried scales rainbow size and score.
-- **Lose:** momentum hits zero underground ("bingo fuel") — no rainbow.
+Evaluated every frame from `depth` (px below the surface) and current
+momentum:
+
+- **Win:** reach the surface (`depth` back to 0) with momentum still to
+  spare, after having drilled at least a minimum depth (so an instant
+  frame-1 pull-up doesn't count). Dust carried scales rainbow size and
+  score.
+- **Lose:** momentum hits exactly zero while still underground ("bingo
+  fuel") — no rainbow. Running out at or above the surface without a
+  qualifying dive is also a loss.
+
+With no dust boosts implemented yet, the only winnable line is a shallow
+dive and an immediate pull-up — a full 180° bank takes ~1s at the current
+turn rate. That's expected until dust lands.
 
 ## Tracked state
 
@@ -42,8 +59,9 @@ Current momentum, dust collected, depth achieved, time elapsed.
 
 ## Controls
 
-The drill thrusts forward along its heading at a constant speed — no
-throttle. Steering only:
+The drill thrusts forward along its heading at a speed equal to its current
+momentum (which starts high and decays — see Core loop) — no throttle.
+Steering only:
 
 - Keyboard: Left / Right arrows, or A / D (plus Q for AZERTY), bank the
   heading at a fixed turn rate.
@@ -208,7 +226,6 @@ consistent.
   jittery/robotic. Also still vertical-only — camera x is pinned to 0. See
   https://gamedesignskills.com/game-design/camera-design-2d-side-scroller-games/
   (warning: heavy with animated gifs) for a survey of options.
-- Momentum at start: fixed amount vs. aim-and-throw (Angry Birds style)?
 - Rock deflection behavior (once rock is added) — bounce angle, momentum
   cost, or both?
 - Depth-bias formula for the generator (see above) — not yet decided.

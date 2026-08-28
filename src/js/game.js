@@ -8,7 +8,7 @@ import { initSpeech } from './speech';
 import { save, load } from './storage';
 import { ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, CHARSET_SIZE, initCharset, renderText, initTextBuffer, clearTextBuffer, renderAnimatedText } from './text';
 import { getRandSeed, setRandSeed, loadImg } from './utils';
-import { CELL_SIZE, sampleMaterial, materialColor } from './terrain';
+import { CELL_SIZE, sampleMaterial, materialColor, MATERIAL_DRAG } from './terrain';
 import TILESET from '../img/tileset.webp';
 
 
@@ -28,10 +28,26 @@ const NORMALIZE_DIAGONAL = Math.cos(Math.PI / 4);
 
 const HERO_W = 24;                             // temporary blue square, real sprite later
 const HERO_H = 24;
-const HERO_SPEED = 200;                        // px/sec, constant forward thrust along hero.angle
 const TURN_SPEED = Math.PI;                    // radians/sec the drill can bank left/right
 
+// momentum loop tuning (px/sec, px/sec^2). The drill launches with a fixed
+// downward impulse (MOMENTUM.initial) that only ever decays: a baseline
+// entropy plus drag from whatever the drill's leading edge is cutting
+// through (MATERIAL_DRAG in terrain.js, or the cheaper tunnel/air values
+// here for backtracking / breaching the surface). Dense-dust boosts will
+// top it back up once dust exists.
+const MOMENTUM = {
+  initial: 620,               // launch impulse
+  entropy: 35,                // material-independent decay, always applied underground
+  tunnelDrag: 15,             // through an already-carved cell - cheap backtrack, not free
+  airDrag: 0,                 // above the surface
+  winMinDepth: 6 * CELL_SIZE, // must have drilled at least this deep for a resurface to count as a win
+};
+
 let hero;
+let heroWentDeep;                              // armed once depth passes MOMENTUM.winMinDepth; gates the resurface win
+let outcome;                                   // true = win (rainbow), false = lose (bingo fuel); read on END_SCREEN
+let endReady;                                  // END_SCREEN: true once all inputs held at game-over have been released
 let depth;                                     // px drilled below the surface (world-space y, until infinite scroll lands)
 
 let speak;
@@ -61,7 +77,9 @@ hero = {
   angle: Math.PI / 2,                   // 0 = facing right (+x), PI/2 = facing down (+y)
   velX: 0,
   velY: 0,
+  momentum: MOMENTUM.initial,
 };
+heroWentDeep = false;
 depth = 0;
 // camera-window & edge-snapping settings
 const CAMERA_WINDOW_X = 400;
@@ -114,7 +132,10 @@ function startGame() {
     angle: Math.PI / 2,              // 0 = facing right (+x), PI/2 = facing down (+y)
     velX: 0,
     velY: 0,
+    momentum: MOMENTUM.initial,
   };
+  heroWentDeep = false;
+  outcome = undefined;
   depth = 0;
   renderMap();
   screen = GAME_SCREEN;
@@ -349,9 +370,12 @@ function processInputs() {
           url: 'https://bit.ly/gmjblp'
         });
       }
-      if (anyKeyDown() || isPointerUp()) {
-        screen = TITLE_SCREEN;
-      }
+      // wait for every key/pointer held when the run ended to be released
+      // first, then a fresh press restarts - otherwise a steering key still
+      // down at the moment momentum ran out restarts instantly. (temporary:
+      // straight back into a new run, no title screen.)
+      if (!anyKeyDown() && !isPointerDown()) endReady = true;
+      if (endReady && (anyKeyDown() || isPointerUp())) startGame();
       break;
   }
 }
@@ -366,24 +390,49 @@ function update() {
   }
 };
 
+// deceleration (px/sec^2) the drill currently suffers, sampled at its
+// leading edge (one drill-radius + one cell ahead of centre along the
+// heading - the centre's own cell is dug out most frames, so sampling
+// there would read "tunnel" while cutting virgin ground). Mirrors
+// paintRow()'s lookup order - sky, then already-dug tunnel, then virgin
+// material - so backtracking up your own shaft is cheap but drilling fresh
+// clay is punishing.
+function currentDrag() {
+  const r = hero.w / 2;
+  const ex = hero.x + hero.w / 2 + Math.cos(hero.angle) * (r + CELL_SIZE);
+  const ey = hero.y + hero.h / 2 + Math.sin(hero.angle) * (r + CELL_SIZE) - SURFACE_Y + mapOffset;
+  if (ey < 0) return MOMENTUM.airDrag;
+  const key = Math.floor(ex / CELL_SIZE) * CELL_SIZE + '_' + Math.floor(ey / CELL_SIZE) * CELL_SIZE;
+  return MOMENTUM.entropy + (DUG.has(key) ? MOMENTUM.tunnelDrag : MATERIAL_DRAG[sampleMaterial(ex, ey)]);
+}
+
 function moveHero() {
-  // constant forward thrust along hero.angle - no throttle control (see
-  // processInputs); item 7 (momentum/drag) will modulate this later.
+  // forward thrust along hero.angle at a speed that is finite, decaying
+  // momentum - no throttle, steering only (see processInputs). Drag comes
+  // from whatever the drill's leading edge is cutting through.
+  hero.momentum = Math.max(0, hero.momentum - currentDrag() * elapsedTime);
   hero.velX = Math.cos(hero.angle);
   hero.velY = Math.sin(hero.angle);
-  hero.x += hero.velX * HERO_SPEED * elapsedTime;
-  hero.y += hero.velY * HERO_SPEED * elapsedTime;
+  hero.x += hero.velX * hero.momentum * elapsedTime;
+  hero.y += hero.velY * hero.momentum * elapsedTime;
   // temporary: clamp to the (currently x-locked) camera width instead of the
   // full map width - there's no horizontal camera panning yet, and proper
   // edge collision is TODO item 6, this just stops the hero drilling off
   // both sides of the visible viewport.
   hero.x = Math.max(0, Math.min(CAMERA_WIDTH - hero.w, hero.x));
-  // temporary: floor at the surface - no resurface/win-condition exists yet
-  // to make "going back above ground" meaningful, so just block it, same as
-  // the old depth-gated moveUp check but expressed as a position clamp since
-  // there's no discrete "moveUp" input anymore (angle can point anywhere).
-  hero.y = Math.max(SURFACE_Y - hero.h, hero.y);
   depth = Math.max(0, Math.round(hero.y + hero.h - SURFACE_Y + mapOffset));
+
+  if (depth >= MOMENTUM.winMinDepth) heroWentDeep = true;
+  // win: back at the surface with momentum still to spare, after a real dive.
+  if (heroWentDeep && depth <= 0 && hero.momentum > 0) return endGame(true);
+  // lose: momentum ran out while still underground ("bingo fuel").
+  if (hero.momentum <= 0) return endGame(false);
+}
+
+function endGame(won) {
+  outcome = won;
+  endReady = false;
+  screen = END_SCREEN;
 }
 
 // stamps a fixed-radius circle around the hero's center every frame (per
@@ -481,14 +530,21 @@ function render() {
       BUFFER_CTX.fillRect(hero.x, hero.y, hero.w, hero.h);
       renderText('game screen', CHARSET_SIZE, CHARSET_SIZE);
       renderText('depth ' + depth, CAMERA_WIDTH - CHARSET_SIZE, CHARSET_SIZE, ALIGN_RIGHT);
+      renderText('momentum ' + Math.round(hero.momentum), CAMERA_WIDTH - CHARSET_SIZE, 2 * CHARSET_SIZE + 4, ALIGN_RIGHT);
       // debugCameraWindow();
       // uncomment to debug mobile input handlers
       // renderDebugTouch();
       break;
     case END_SCREEN:
-      BUFFER_CTX.fillStyle = '#fff';
-      BUFFER_CTX.fillRect(0, 0, BUFFER.width, BUFFER.height);
-      renderText('end screen', CHARSET_SIZE, CHARSET_SIZE);
+      // keep the map + last hero position on screen (less jarring than a
+      // flat wipe, and the player sees where they ran out); just overlay
+      // the outcome text.
+      BUFFER_CTX.drawImage(MAP, 0, 0, BUFFER.width, BUFFER.height);
+      BUFFER_CTX.fillStyle = '#2255ee';
+      BUFFER_CTX.fillRect(hero.x, hero.y, hero.w, hero.h);
+      renderText(outcome ? 'rainbow!' : 'out of momentum', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2, ALIGN_CENTER);
+      renderText('depth ' + depth, CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + 2 * CHARSET_SIZE, ALIGN_CENTER);
+      if (endReady) renderText(isMobile ? 'tap to retry' : 'press any key', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + 4 * CHARSET_SIZE, ALIGN_CENTER);
       // renderText(monetizationEarned(), TEXT.width - CHARSET_SIZE, TEXT.height - 2*CHARSET_SIZE, ALIGN_RIGHT);
       break;
   }
