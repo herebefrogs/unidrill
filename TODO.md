@@ -14,7 +14,7 @@ for the reasoning behind each of these; this is just the sequencing.
 - [x] Add the digging overlay (track which pixels have been dug). Temporary
       control: always digs a straight vertical shaft — just enough to prove
       backtracking doesn't lose dug-location history.
-- [ ] Start tracking player velocity and angle: switch to real controls
+- [x] Start tracking player velocity and angle: switch to real controls
       (left/right banks the drill left/right, applied to angle).
 - [ ] Handle colliding with the vertical edges of the map.
 - [ ] Momentum / entropy / material drag.
@@ -32,3 +32,10 @@ for the reasoning behind each of these; this is just the sequencing.
       stands out. "UniDrill Corp" is just the working title for now.
 - [ ] Create the title screen (currently skipped: boots straight into
       GAME_SCREEN, see game.js).
+- [ ] Revisit pointer steering: direction changes feel abrupt right now,
+      because of the unusual pointer-direction logic in src/js/inputs/pointer.js
+      (built to work around a smartphone touch quirk - get the full context
+      from Jerome before changing it).
+- [ ] Add gamepad support. There's prior art in Jerome's old veggie-ninja repo:
+      https://github.com/herebefrogs/veggie-ninja/blob/master/src/js/gamepad.js
+      (and possibly an older commit in gamejam-boilerplate's own history).

@@ -7,7 +7,7 @@ import { loadSongs, playSound, playSong } from './sound';
 import { initSpeech } from './speech';
 import { save, load } from './storage';
 import { ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, CHARSET_SIZE, initCharset, renderText, initTextBuffer, clearTextBuffer, renderAnimatedText } from './text';
-import { getRandSeed, setRandSeed, lerp, loadImg } from './utils';
+import { getRandSeed, setRandSeed, loadImg } from './utils';
 import { CELL_SIZE, sampleMaterial, materialColor } from './terrain';
 import TILESET from '../img/tileset.webp';
 
@@ -25,11 +25,11 @@ let screen = GAME_SCREEN; // TODO restore TITLE_SCREEN once GAME_SCREEN is furth
 // factor by which to reduce both velX and velY when player moving diagonally
 // so they don't seem to move faster than when traveling vertically or horizontally
 const NORMALIZE_DIAGONAL = Math.cos(Math.PI / 4);
-const TIME_TO_FULL_SPEED = 150;                // in millis, duration till going full speed in any direction
 
 const HERO_W = 24;                             // temporary blue square, real sprite later
 const HERO_H = 24;
-const HERO_SPEED = 200;                        // px/sec, temporary
+const HERO_SPEED = 200;                        // px/sec, constant forward thrust along hero.angle
+const TURN_SPEED = Math.PI;                    // radians/sec the drill can bank left/right
 
 let hero;
 let depth;                                     // px drilled below the surface (world-space y, until infinite scroll lands)
@@ -58,6 +58,8 @@ hero = {
   y: SURFACE_Y - HERO_H,                // feet on the ground, not center
   w: HERO_W,
   h: HERO_H,
+  angle: Math.PI / 2,                   // 0 = facing right (+x), PI/2 = facing down (+y)
+  velX: 0,
   velY: 0,
 };
 depth = 0;
@@ -109,6 +111,8 @@ function startGame() {
     y: SURFACE_Y - HERO_H,          // feet on the ground, not center
     w: HERO_W,
     h: HERO_H,
+    angle: Math.PI / 2,              // 0 = facing right (+x), PI/2 = facing down (+y)
+    velX: 0,
     velY: 0,
   };
   depth = 0;
@@ -316,8 +320,12 @@ function processInputs() {
       }
       break;
     case GAME_SCREEN:
+      // drill always thrusts forward along hero.angle (see moveHero) -
+      // there's no throttle. Left/right bank the angle by a rate; a pointer
+      // drag replaces the angle outright with the drag direction.
       if (isPointerDown()) {
-        [hero.velX, hero.velY] = pointerDirection();
+        const [vX, vY] = pointerDirection();
+        if (vX || vY) hero.angle = Math.atan2(vY, vX);
       } else {
         hero.moveLeft = isKeyDown(
           'ArrowLeft',
@@ -328,28 +336,8 @@ function processInputs() {
           'ArrowRight',
           'KeyD'
         );
-        // temporary: block moving further up once already at the surface
-        // (depth 0), until there's a reason to walk around up there
-        hero.moveUp = depth > 0 && isKeyDown(
-          'ArrowUp',
-          'KeyW',   // English Keyboard layout
-          'KeyZ'    // French keyboard layout
-        );
-        hero.moveDown = isKeyDown(
-          'ArrowDown',
-          'KeyS'
-        );
-
-        if (hero.moveLeft || hero.moveRight) {
-          hero.velX = (hero.moveLeft > hero.moveRight ? -1 : 1) * lerp(0, 1, (currentTime - Math.max(hero.moveLeft, hero.moveRight)) / TIME_TO_FULL_SPEED)
-        } else {
-          hero.velX = 0;
-        }
-        if (hero.moveDown || hero.moveUp) {
-          hero.velY = (hero.moveUp > hero.moveDown ? -1 : 1) * lerp(0, 1, (currentTime - Math.max(hero.moveUp, hero.moveDown)) / TIME_TO_FULL_SPEED)
-        } else {
-          hero.velY = 0;
-        }
+        if (hero.moveLeft) hero.angle -= TURN_SPEED * elapsedTime;
+        if (hero.moveRight) hero.angle += TURN_SPEED * elapsedTime;
       }
       break;
     case END_SCREEN:
@@ -379,22 +367,35 @@ function update() {
 };
 
 function moveHero() {
-  // no map-bounds clamp here: depth is unbounded, the buffer scrolls to
-  // keep up (see scrollMap). Moving further up than the surface is already
-  // blocked in processInputs() by gating hero.moveUp on depth > 0.
+  // constant forward thrust along hero.angle - no throttle control (see
+  // processInputs); item 7 (momentum/drag) will modulate this later.
+  hero.velX = Math.cos(hero.angle);
+  hero.velY = Math.sin(hero.angle);
+  hero.x += hero.velX * HERO_SPEED * elapsedTime;
   hero.y += hero.velY * HERO_SPEED * elapsedTime;
+  // temporary: clamp to the (currently x-locked) camera width instead of the
+  // full map width - there's no horizontal camera panning yet, and proper
+  // edge collision is TODO item 6, this just stops the hero drilling off
+  // both sides of the visible viewport.
+  hero.x = Math.max(0, Math.min(CAMERA_WIDTH - hero.w, hero.x));
+  // temporary: floor at the surface - no resurface/win-condition exists yet
+  // to make "going back above ground" meaningful, so just block it, same as
+  // the old depth-gated moveUp check but expressed as a position clamp since
+  // there's no discrete "moveUp" input anymore (angle can point anywhere).
+  hero.y = Math.max(SURFACE_Y - hero.h, hero.y);
   depth = Math.max(0, Math.round(hero.y + hero.h - SURFACE_Y + mapOffset));
 }
 
-// temporary: there's no real drilling shape/direction yet (TODO item 5), so
-// the hero just digs out whatever cells it's currently standing in, every
-// frame - with the current up/down-only controls that always produces a
-// straight vertical shaft. Good enough to prove DUG survives backtracking.
+// stamps a fixed-radius circle around the hero's center every frame (per
+// DESIGN.md: fixed-width tunnel, not variable). An axis-aligned box would've
+// carved a fatter tunnel on diagonals than straight down/up.
 function digShaft() {
-  const top = hero.y - SURFACE_Y + mapOffset;
-  for (let x = Math.floor(hero.x / CELL_SIZE) * CELL_SIZE; x < hero.x + hero.w; x += CELL_SIZE) {
-    for (let y = Math.max(0, Math.floor(top / CELL_SIZE) * CELL_SIZE); y < top + hero.h; y += CELL_SIZE) {
-      dig(x, y);
+  const cx = hero.x + hero.w / 2;
+  const cy = hero.y + hero.h / 2 - SURFACE_Y + mapOffset;   // underground-space
+  const r = hero.w / 2;
+  for (let x = Math.floor((cx - r) / CELL_SIZE) * CELL_SIZE; x < cx + r; x += CELL_SIZE) {
+    for (let y = Math.max(0, Math.floor((cy - r) / CELL_SIZE) * CELL_SIZE); y < cy + r; y += CELL_SIZE) {
+      if (Math.hypot(x + CELL_SIZE / 2 - cx, y + CELL_SIZE / 2 - cy) <= r) dig(x, y);
     }
   }
 }

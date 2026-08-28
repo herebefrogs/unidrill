@@ -15,6 +15,14 @@
    mistake or intentional (e.g. for build/minification reasons), ask before
    changing it.
 
+## Game design
+
+ - When in doubt about a game design direction or choice (mechanics, controls,
+   feel, scope of a TODO item), ask a clarifying question before implementing
+   rather than guessing — saves both of us time and avoids disappointment.
+   Only raise the big/consequential calls this way; don't ask about trivial
+   details (constants, naming, minor tuning) that are cheap to adjust after.
+
 ## Game engine
 
  - `src/js/inputs/`'s only responsibility is to record the latest raw input
