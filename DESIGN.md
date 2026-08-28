@@ -52,9 +52,12 @@ momentum:
   fuel") — no rainbow. Running out at or above the surface without a
   qualifying dive is also a loss.
 
-With no dust boosts implemented yet, the only winnable line is a shallow
-dive and an immediate pull-up — a full 180° bank takes ~1s at the current
-turn rate. That's expected until dust lands.
+Dense dust tops momentum back up (`MOMENTUM.denseBoost` px/sec per dense
+cell dug — `digShaft()` clears several cells per tick, so entering a patch
+gives a jolt), so a deeper dive is winnable when the drilled route threads
+through dense patches. A dive that misses them decays on drag + entropy
+alone, and the only safe line is a shallow pull-up (a full 180° bank takes
+~1s at the current turn rate).
 
 ## Tracked state
 
@@ -311,10 +314,13 @@ plus a momentum top-up when the cell was DENSE).
   (warning: heavy with animated gifs) for a survey of options.
 - Rock deflection behavior (once rock is added) — bounce angle, momentum
   cost, or both?
-- Dense-dust momentum boost: per collected cell, or capped per tick?
-  `digShaft()` clears many cells in one tick, so a plain per-cell boost
-  hands out a big jolt when the drill enters a dense patch. Ship per-cell,
-  tune later; revisit if the spike feels bad.
+- Dense-dust momentum boost: shipped **per collected cell**
+  (`MOMENTUM.denseBoost`), clamped to `MOMENTUM.max` (currently == launch
+  momentum, so dense dust restores toward launch speed without overcharging
+  past it). `digShaft()` clears several cells per tick so patch entry is a
+  jolt — playtested as acceptable, not a lurch. Open: whether to lift the
+  cap and allow overcharge above launch momentum (would make dense dust an
+  overdrive, not just a top-up).
 - Depth-bias formula for the generator (see above) — not yet decided.
 - Endless generation is solved for *sequential* depth access (player only
   ever extends from the surface downward); no random-access-to-arbitrary-depth

@@ -38,9 +38,11 @@ const TURN_SPEED = Math.PI;                    // radians/sec the drill can bank
 // top it back up once dust exists.
 const MOMENTUM = {
   initial: 620,               // launch impulse
+  max: 620,                   // dense-dust boosts restore toward launch speed, never above - also keeps digShaft's per-frame circle contiguous (a faster drill would skip cells between frames)
   entropy: 35,                // material-independent decay, always applied underground
   tunnelDrag: 15,             // through an already-carved cell - cheap backtrack, not free
   airDrag: 0,                 // above the surface
+  denseBoost: 30,             // px/sec added per dense-dust cell dug; digShaft clears several cells/tick so patch entry is a jolt (see DESIGN Open questions)
   winMinDepth: 6 * CELL_SIZE, // must have drilled at least this deep for a resurface to count as a win
 };
 
@@ -49,6 +51,7 @@ let heroWentDeep;                              // armed once depth passes MOMENT
 let outcome;                                   // true = win (rainbow), false = lose (bingo fuel); read on END_SCREEN
 let endReady;                                  // END_SCREEN: true once all inputs held at game-over have been released
 let depth;                                     // px drilled below the surface (world-space y, until infinite scroll lands)
+let dust;                                       // rainbow-dust cells collected this run (= DUG ∩ sampleDust, tallied at dig time). The "visuals" item moves the HUD tick to particle-arrival; the count itself stays here.
 
 let speak;
 
@@ -81,6 +84,7 @@ hero = {
 };
 heroWentDeep = false;
 depth = 0;
+dust = 0;
 // camera-window & edge-snapping settings
 const CAMERA_WINDOW_X = 400;
 const CAMERA_WINDOW_Y = 200;
@@ -137,6 +141,7 @@ function startGame() {
   heroWentDeep = false;
   outcome = undefined;
   depth = 0;
+  dust = 0;
   renderMap();
   screen = GAME_SCREEN;
 };
@@ -385,8 +390,13 @@ function update() {
 
   if (screen === GAME_SCREEN) {
     moveHero();
-    digShaft();
-    followCamera();
+    // moveHero() may have ended the run this frame (bingo fuel / resurface
+    // win); don't dig - a post-mortem dig would still tally dust and top up
+    // momentum after game-over.
+    if (screen === GAME_SCREEN) {
+      digShaft();
+      followCamera();
+    }
   }
 };
 
@@ -458,6 +468,16 @@ function dig(x, undergroundY) {
     DUG.add(key);
     MAP_CTX.fillStyle = TUNNEL_COLOR;
     MAP_CTX.fillRect(x, undergroundY + SURFACE_Y - mapOffset, CELL_SIZE, CELL_SIZE);
+    // collection = DUG ∩ sampleDust, so a cell counts the first (only) time
+    // it's dug. +1 per cell regardless of category - "dense yields more" is
+    // already delivered by dense patches being solid vs sparse's ~25% mask.
+    // Dense cells also top momentum back up (per-cell; digShaft clears a few
+    // at once, so patch entry gives a jolt).
+    const d = sampleDust(x, undergroundY);
+    if (d !== DUST_NONE) {
+      dust++;
+      if (d === DUST_DENSE) hero.momentum = Math.min(MOMENTUM.max, hero.momentum + MOMENTUM.denseBoost);
+    }
   }
 }
 
@@ -531,6 +551,7 @@ function render() {
       renderText('game screen', CHARSET_SIZE, CHARSET_SIZE);
       renderText('depth ' + depth, CAMERA_WIDTH - CHARSET_SIZE, CHARSET_SIZE, ALIGN_RIGHT);
       renderText('momentum ' + Math.round(hero.momentum), CAMERA_WIDTH - CHARSET_SIZE, 2 * CHARSET_SIZE + 4, ALIGN_RIGHT);
+      renderText('dust ' + dust, CAMERA_WIDTH - CHARSET_SIZE, 3 * CHARSET_SIZE + 8, ALIGN_RIGHT);
       // debugCameraWindow();
       // uncomment to debug mobile input handlers
       // renderDebugTouch();
@@ -544,6 +565,7 @@ function render() {
       BUFFER_CTX.fillRect(hero.x, hero.y, hero.w, hero.h);
       renderText(outcome ? 'rainbow!' : 'out of momentum', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2, ALIGN_CENTER);
       renderText('depth ' + depth, CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + 2 * CHARSET_SIZE, ALIGN_CENTER);
+      renderText('dust ' + dust, CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + 3 * CHARSET_SIZE, ALIGN_CENTER);
       if (endReady) renderText(isMobile ? 'tap to retry' : 'press any key', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + 4 * CHARSET_SIZE, ALIGN_CENTER);
       // renderText(monetizationEarned(), TEXT.width - CHARSET_SIZE, TEXT.height - 2*CHARSET_SIZE, ALIGN_RIGHT);
       break;
