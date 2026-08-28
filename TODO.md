@@ -34,11 +34,15 @@ for the reasoning behind each of these; this is just the sequencing.
       `#f77`. Occurrence weights left for gameplay balancing once collect +
       boost land. See DESIGN.md "Dust field".
 - [ ] Rainbow dust — properties. Hook collection into `dig()`'s
-      `if (!DUG.has(key))` guard: if the new cell is in the dust field,
-      `+1` the dust counter; if DENSE, add a configurable amount to
-      `hero.momentum`. No `COLLECTED` set — collected = `DUG` ∩
-      `sampleDust`. Show the counter in the HUD. Landing this retires the
-      "no dust boosts implemented yet" paragraph in DESIGN.md's Win/lose.
+      `if (!DUG.has(key))` guard: call `sampleDust(x, undergroundY)` (dig()
+      already has both in underground space); if it's not NONE, `+1` the
+      dust counter; if DENSE, add a configurable amount to `hero.momentum`.
+      No `COLLECTED` set — collected = `DUG` ∩ `sampleDust`. Show the
+      counter in the HUD. NOTE: `digShaft()` clears many cells per tick, so
+      a per-cell DENSE boost is a big jolt on patch entry — ship per-cell,
+      revisit the per-tick-cap (already noted in DESIGN Open questions) if
+      it feels bad. Landing this retires the "no dust boosts implemented
+      yet" paragraph in DESIGN.md's Win/lose.
 - [ ] Rainbow dust — visuals. (a) Palette rotation: every on-screen dust
       cell shares one hue cycled red→orange→yellow→green→blue→purple→red
       over time; render on a per-frame animation layer between the MAP blit

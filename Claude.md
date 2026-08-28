@@ -6,7 +6,7 @@
  | File | What's in it |
  |---|---|
  | `src/js/game.js` | **Everything gameplay**: RAF loop, the 3 screens (TITLE/GAME/END), `hero` state + `moveHero()` + momentum/drag + win-lose, camera follow, the `MAP` buffer paging (`scrollMap`/`paintRow`), digging (`digShaft`/`dig`/`DUG`), all rendering, input dispatch (`processInputs`). |
- | `src/js/terrain.js` | Pure procedural terrain: `sampleMaterial(x,y)` (macro sections + rock-blob pass), `CELL_SIZE`, materials `SAND`/`CLAY`, `MATERIAL_COLOR`, `MATERIAL_DRAG`. Nothing stored — recomputed on demand. |
+ | `src/js/terrain.js` | Pure procedural terrain: `sampleMaterial(x,y)` (macro sections + rock-blob pass) and `sampleDust(x,y)` → `DUST_NONE`/`SPARSE`/`DENSE` (own microgrid, wobbly patches, quarter-grid dither for sparse). `CELL_SIZE`, materials `SAND`/`CLAY`, `MATERIAL_COLOR`, `MATERIAL_DRAG`. All keyed off the stateless `hash2D` — nothing stored, recomputed on demand. |
  | `src/js/inputs/keyboard.js`, `inputs/pointer.js` | Raw input capture only (see Game engine below). `pointer.js`'s drag-direction logic is deliberately unusual — ask before touching. |
  | `src/js/text.js` | Bitmap text (`renderText`, `CHARSET_SIZE`, `ALIGN_*`). |
  | `src/js/utils.js` | Seeded PRNG, `lerp`, `clamp`, `loadImg`. |
@@ -23,6 +23,20 @@
    `depth` stays invariant.
  - **The `MAP` buffer is paged, never rebuilt.** `scrollMap()` self-blits by
    the scroll delta and `paintRow()` repaints only the newly exposed strip.
+   Dust is currently a TEMP debug tint baked into `paintRow` — the real
+   render is a per-frame animation layer (palette rotation + collect
+   particles), still TODO. Don't build on the baked version.
+ - **Two independent RNGs, never crossed.** `terrain.js` `hash2D` is a
+   *stateless* pure hash — everything underground (terrain, dust, later
+   ore) keys off it, safe to share freely since output depends only on the
+   coords. `utils.js` `prng` (from `setRandSeed`) is a *stateful stream* —
+   anything transient/cosmetic (particles, sound variation) draws from it
+   or a fresh generator, **never** from `hash2D`. `hash2D` has no seed
+   wired in yet (identical map every run); the "RNG seeds" TODO adds one.
+ - **Cell-index math uses `Math.floor`, not `| 0`.** They diverge for
+   negative coords (`| 0` truncates toward zero → a double-wide cell and a
+   mirror seam at the origin). Harmless while everything is `x >= 0`; will
+   bite when the map extends left of `x = 0` (horizontal panning).
  - **Build:** the user keeps `npm start` running in another terminal (see
    memory). Don't run `npm run build` while it's live. `npm run build:js`
    alone is a safe "does it bundle?" check.

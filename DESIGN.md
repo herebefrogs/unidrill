@@ -160,9 +160,13 @@ variable-width-by-momentum for lower implementation cost.)
 
 Pure function, evaluated on demand, nothing precomputed or stored for the
 "base" terrain — that's what makes depth unbounded for free. Everything keys
-off `hash2D`, a deterministic hash of an integer coordinate pair returning a
-value in `[0, 1)`; the run's seed is mixed into that hash (see
-Replayability). Two passes:
+off `hash2D`, a *stateless* deterministic hash of an integer coordinate
+pair returning a value in `[0, 1)` — output depends only on the coords, so
+call order and count never matter (this is why terrain and dust can share
+it freely, and why transient randomness must **not** — it belongs in
+`utils.js`'s stateful PRNG). The run's seed will be mixed into `hash2D`
+(see Replayability) — not wired yet, so every run currently generates the
+same map. Two passes:
 
 **Macro pattern pass.** The world is cut into large square sections
 (`SECTION_SIZE`, currently 480px). Each section deterministically rolls one
@@ -214,9 +218,9 @@ curve instead of being depth-agnostic decoration.
 ### Dust field — `sampleDust(x, y)`
 
 A **separate pass, parallel to `sampleMaterial()`**, not a new material.
-Same shape — a pure deterministic function off `hash2D` with the run seed
-mixed in — but its **own microgrid**, never touching the rock-blob grid or
-the macro sections. It answers, per `CELL_SIZE` cell:
+Same shape — a pure deterministic function off the same stateless `hash2D`
+— but its **own microgrid**, never touching the rock-blob grid or the macro
+sections. It answers, per `CELL_SIZE` cell:
 
 ```
  sampleDust(x, y):
