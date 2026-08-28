@@ -60,7 +60,8 @@ jobs:
           git status
           git config user.name 'github-actions'
           git config user.email 'github-actions@github.com'
-          git commit -F ../commit-msg index.html
+          git add index.html
+          git commit -F ../commit-msg
           git push
 
 #      - name: Publish game to Itch.io via Butler
