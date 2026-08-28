@@ -24,11 +24,32 @@ for the reasoning behind each of these; this is just the sequencing.
       from the material at the drill's leading edge (`MATERIAL_DRAG` in
       terrain.js; dug tunnel & air use the cheaper values in `MOMENTUM`).
       Win/lose evaluated in `moveHero()` from `depth` + momentum.
+- [x] Rainbow dust — distribution. `sampleDust(x, y)` in terrain.js: a
+      pass parallel to `sampleMaterial()` with its own microgrid
+      (`DUST_CELL`), returning NONE / SPARSE / DENSE per `CELL_SIZE` cell.
+      Patch centres jittered + boundary wobbled (two-harmonic, like the
+      rock blobs) so the outline is an irregular splat. SPARSE lit by a
+      quarter-grid dither mask (~25%), DENSE a solid fill; dense wins on
+      overlap. Temp debug tint baked into `paintRow`: DENSE `#e00`, SPARSE
+      `#f77`. Occurrence weights left for gameplay balancing once collect +
+      boost land. See DESIGN.md "Dust field".
+- [ ] Rainbow dust — properties. Hook collection into `dig()`'s
+      `if (!DUG.has(key))` guard: if the new cell is in the dust field,
+      `+1` the dust counter; if DENSE, add a configurable amount to
+      `hero.momentum`. No `COLLECTED` set — collected = `DUG` ∩
+      `sampleDust`. Show the counter in the HUD. Landing this retires the
+      "no dust boosts implemented yet" paragraph in DESIGN.md's Win/lose.
+- [ ] Rainbow dust — visuals. (a) Palette rotation: every on-screen dust
+      cell shares one hue cycled red→orange→yellow→green→blue→purple→red
+      over time; render on a per-frame animation layer between the MAP blit
+      and the HUD text — dust must NOT be baked into MAP. (b) Collection
+      particles: on dig, spawn the cell's pixels in screen space, fly them
+      to the HUD counter under linear acceleration, tick the counter on
+      arrival. See DESIGN.md "Graphics".
 - [ ] Add ROCK as a third material. Solid and undrillable — the drill can't
       carve it. On contact it deflects the player's heading (bounce) rather
       than stopping them dead. See DESIGN.md (materials, and the rock
       deflection open question).
-- [ ] Rainbow dust.
 - [ ] Horizontal camera panning. Camera x is pinned to 0 right now
       (`followCamera()` only touches y; `updateCameraWindow()` has x logic
       but is never called). Needed before edge collision can clamp to the

@@ -118,3 +118,87 @@ export const sampleMaterial = (x, y) => {
 };
 
 export const materialColor = type => MATERIAL_COLOR[type];
+
+// --- dust field pass --------------------------------------------------
+// a pass parallel to sampleMaterial(), on its OWN microgrid — never the
+// rock-blob grid or the macro sections. Answers NONE / SPARSE / DENSE per
+// CELL_SIZE cell; dust overlays whatever substrate is there (sand or clay).
+// Nothing stored — recomputed on demand like the rest of the terrain.
+export const DUST_NONE = 0;
+export const DUST_SPARSE = 1;
+export const DUST_DENSE = 2;
+
+// probability of each dust-patch category per dust-grid cell; must sum to 1.
+// DENSE is rarest (bigger yield + the only momentum top-up).
+const DUST_WEIGHTS = [0.66, 0.25, 0.09];
+
+// px per dust-patch candidate cell; must stay >= the largest maxR below
+// inflated by the worst-case wobble (1 + 0.40 + 0.20 = 1.6x), so a patch
+// can never reach past its immediate neighbor (keeps sampleDust's 3x3 scan
+// exhaustive)
+const DUST_CELL = 132;
+
+// per-category patch radius range (px). SPARSE patches are wider but only
+// ~25% filled (quarter-grid dither mask); DENSE patches are tighter but solid.
+const DUST_PATCH = [
+  null,                     // NONE
+  { minR: 38, maxR: 76 },   // SPARSE
+  { minR: 22, maxR: 46 },   // DENSE
+];
+
+// one jittered dust patch per grid cell, or null when the cell rolled NONE.
+// amp/phase drive the same two-harmonic radius wobble as the rock blobs
+// (see dustContains) so the patch outline is lumpy, not a clean circle.
+const dustPatchAt = (gx, gy) => {
+  const roll = hash2D(gx + 54812, gy + 54812);
+  let acc = 0, cat = 0;
+  for (; cat < DUST_WEIGHTS.length - 1; cat++) {
+    acc += DUST_WEIGHTS[cat];
+    if (roll < acc) break;
+  }
+  const cfg = DUST_PATCH[cat];
+  if (!cfg) return null;
+  return {
+    cat,
+    x: (gx + hash2D(gx + 7, gy + 7)) * DUST_CELL,
+    y: (gy + hash2D(gx + 7, gy + 11)) * DUST_CELL,
+    r: cfg.minR + hash2D(gx + 13, gy + 7) * (cfg.maxR - cfg.minR),
+    amp1: 0.20 + hash2D(gx + 17, gy + 7) * 0.20,
+    phase1: hash2D(gx + 7, gy + 17) * 6.28,
+    amp2: 0.08 + hash2D(gx + 23, gy + 7) * 0.12,
+    phase2: hash2D(gx + 7, gy + 23) * 6.28,
+  };
+};
+
+// is (x,y) inside this patch? radius wobbles with angle (two sine harmonics)
+// so the boundary reads as an irregular splat, not a circular arc
+const dustContains = (p, x, y) => {
+  const dx = x - p.x, dy = y - p.y;
+  const angle = Math.atan2(dy, dx);
+  const wobble = 1 + p.amp1 * Math.sin(3 * angle + p.phase1) + p.amp2 * Math.sin(5 * angle + p.phase2);
+  return Math.hypot(dx, dy) <= p.r * wobble;
+};
+
+// dither mask for SPARSE patches: a quarter grid (every other cell on every
+// other row, ~25% fill), deliberately NOT a per-cell hash roll (reads as
+// noise). A regular lattice was picked over staggered/diagonal masks on
+// purpose — the eye locks onto the grid and stops reading the coarse cell
+// size as graininess. x, y are already CELL_SIZE-aligned here (paintRow).
+const dustDitherLit = (x, y) => {
+  const cx = Math.floor(x / CELL_SIZE), cy = Math.floor(y / CELL_SIZE);
+  return (cx & 1) === 0 && (cy & 1) === 0;
+};
+
+export const sampleDust = (x, y) => {
+  const gx = Math.floor(x / DUST_CELL), gy = Math.floor(y / DUST_CELL);
+  let found = DUST_NONE;
+  for (let ny = gy - 1; ny <= gy + 1; ny++) {
+    for (let nx = gx - 1; nx <= gx + 1; nx++) {
+      const p = dustPatchAt(nx, ny);
+      if (!p || !dustContains(p, x, y)) continue;
+      if (p.cat === DUST_DENSE) return DUST_DENSE;   // dense fills solid, wins outright
+      if (dustDitherLit(x, y)) found = DUST_SPARSE;
+    }
+  }
+  return found;
+};

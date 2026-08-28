@@ -8,7 +8,7 @@ import { initSpeech } from './speech';
 import { save, load } from './storage';
 import { ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, CHARSET_SIZE, initCharset, renderText, initTextBuffer, clearTextBuffer, renderAnimatedText } from './text';
 import { getRandSeed, setRandSeed, loadImg } from './utils';
-import { CELL_SIZE, sampleMaterial, materialColor, MATERIAL_DRAG } from './terrain';
+import { CELL_SIZE, sampleMaterial, materialColor, MATERIAL_DRAG, sampleDust, DUST_NONE, DUST_DENSE } from './terrain';
 import TILESET from '../img/tileset.webp';
 
 
@@ -573,7 +573,17 @@ function debugCameraWindow() {
 function paintRow(y) {
   const underground = y - SURFACE_Y + mapOffset;
   for (let x = 0; x < MAP.width; x += CELL_SIZE) {
-    MAP_CTX.fillStyle = underground < 0 ? SKY_COLOR : DUG.has(x + '_' + underground) ? TUNNEL_COLOR : materialColor(sampleMaterial(x, underground));
+    const dug = DUG.has(x + '_' + underground);
+    let color = underground < 0 ? SKY_COLOR : dug ? TUNNEL_COLOR : materialColor(sampleMaterial(x, underground));
+    // TEMP: dust-distribution debug tint, baked straight into MAP so we can
+    // eyeball the sampleDust() field. The real dust render (palette rotation
+    // + fly-to-HUD particles) belongs on a per-frame animation layer and
+    // must NOT be baked — see the "Rainbow dust — visuals" TODO.
+    if (underground >= 0 && !dug) {
+      const dust = sampleDust(x, underground);
+      if (dust !== DUST_NONE) color = dust === DUST_DENSE ? '#e00' : '#f77';
+    }
+    MAP_CTX.fillStyle = color;
     MAP_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
   }
 };

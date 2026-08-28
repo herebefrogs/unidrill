@@ -31,8 +31,11 @@ back to the surface with what you've got before you run out of momentum.**
   Backtracking up an already-carved tunnel is cheap (tunnel drag + entropy
   only), which is what makes the return trip affordable. Rock, once added,
   deflects the unicorn instead of dragging.
-- Rainbow dust comes in sparse patches (small yield) and dense patches
-  (bigger yield + temporary momentum boost).
+- Rainbow dust comes in sparse patches (small yield, dust cells scattered
+  on a dither mask) and dense patches (bigger yield + momentum boost, dust
+  cells packed in a jittered blob). Dust is an **orthogonal field** laid
+  over the terrain — it sits on sand and clay alike, it is not a third
+  material. A dense patch is the only thing that tops momentum back up.
 - Carrying more dust drains momentum faster — the deeper/greedier you go,
   the more precarious the trip back.
 
@@ -74,8 +77,30 @@ Steering only:
 
 ## Graphics
 
-2D side view, pixel art. Dust cycles through rainbow hues via palette
-rotation. Heavy hit-stop and camera shake for impact.
+2D side view, pixel art. Heavy hit-stop and camera shake for impact.
+
+**Dust palette rotation.** Every uncollected dust cell on screen shares one
+hue, cycled globally over time: red → orange → yellow → green → blue →
+purple → red. The classic palette-cycling trick — all pixels of "the dust
+colour" shift together, driven by one clock, not per-cell. This forces dust
+*out* of the baked `MAP` buffer (which freezes colours per row as it pages)
+and onto a per-frame **animation layer**.
+
+**Collection animation.** When a dust cell is dug, its pixels detach and
+fly in a straight line toward the dust counter in the screen corner, moving
+under linear acceleration (ease-in), then vanish on arrival. The counter
+ticks up when the particle lands, not when the cell is dug. Particles are
+spawned into **screen space** and animate purely there — dust cells live in
+underground space and the camera scrolls, so a particle tracked in world
+space would drift off the counter.
+
+**Layer order** (far → near):
+
+```
+  MAP layer         baked terrain + carved tunnel (paged buffer)
+  animation layer    live dust cells (cycling hue) + in-flight collection particles
+  HUD layer          dust counter, depth, momentum (TEXT buffer)
+```
 
 Stretch goal: anaglyph red/cyan mode — requires background/entity depth-plane
 separation for parallax.
@@ -181,22 +206,72 @@ Only two materials so far — **SAND** (traversable / background) and **CLAY**
 behaviour is still a future addition (see Open questions); the blob pass is
 named "rock" in the code but currently emits `CLAY`.
 
-Dust (a separate richness field — none / sparse / dense patches, dense ones
-rarer and clustered) is not built yet. Whatever generates it gets its own
-pass; it must not reuse the blob field.
-
 Depth-bias idea (not yet decided): bias the pattern weights / blob chance by
 a slow function of depth, so dense/solid terrain (and later dense dust)
 grows more likely the deeper you go — tying generation to the risk/reward
 curve instead of being depth-agnostic decoration.
 
+### Dust field — `sampleDust(x, y)`
+
+A **separate pass, parallel to `sampleMaterial()`**, not a new material.
+Same shape — a pure deterministic function off `hash2D` with the run seed
+mixed in — but its **own microgrid**, never touching the rock-blob grid or
+the macro sections. It answers, per `CELL_SIZE` cell:
+
+```
+ sampleDust(x, y):
+   cell inside a dense patch?   → DENSE
+   cell lit by the dither mask
+     of a sparse patch?         → SPARSE
+   otherwise                    → NONE
+```
+
+`sampleMaterial` and `sampleDust` are independent — a cell can be
+`(CLAY, DENSE)`, `(SAND, SPARSE)`, `(CLAY, NONE)`, etc. Dust overlays
+whatever substrate is there.
+
+**Patch placement.** Each dust microgrid cell (`DUST_CELL`, its own grid)
+deterministically rolls NONE / SPARSE / DENSE from fixed weights (DENSE
+rarest). A cell that rolls a patch gets a jittered centre + radius, and its
+boundary **wobbles with angle** (two sine harmonics, same trick as the rock
+blobs) so the patch reads as an irregular splat, not a circle. SPARSE
+patches are wider, DENSE tighter. On overlap, DENSE wins.
+
+**Sparse = dither mask, not a coin flip.** Inside a sparse patch's
+footprint, dust cells are lit by a fixed **quarter-grid** mask (every other
+cell on every other row, ~25% fill) keyed to the cell's `(x, y)` —
+deliberately *not* `hash2D(x,y) < p`, which reads as noise. A regular grid
+was picked over staggered/diagonal masks on purpose: the eye locks onto the
+lattice and stops reading the coarse cell resolution as graininess.
+
+```
+  sparse patch footprint          dense patch footprint
+  ▓ · ▓ · ▓ · ▓ ·                  ▓ ▓ ▓ ▓ ▓ ▓ ▓
+  · · · · · · · ·                  ▓ ▓ ▓ ▓ ▓ ▓ ▓      ▓ = dust cell
+  ▓ · ▓ · ▓ · ▓ ·                  ▓ ▓ ▓ ▓ ▓ ▓ ▓      · = bare substrate
+  · · · · · · · ·                  ▓ ▓ ▓ ▓ ▓ ▓ ▓
+```
+
+**Dense = solid fill**, like a clay blob — every cell inside the wobbly
+patch boundary is a dust cell.
+
+The dust field must **never be baked into `MAP`** (see Graphics — palette
+rotation); the real render resamples it per frame for the visible strip.
+The current temporary render breaks that rule — it tints the field straight
+into `paintRow` (DENSE `#e00`, SPARSE `#f77`) so the distribution can be
+eyeballed. Replaced by the animation layer in the "visuals" sub-item.
+
 ### Storing the mutable state
 
 The generated terrain is never stored — it's recomputed from
 `sampleMaterial()` on demand. What **must** persist is only the player's
-mutations (carved cells, and collected dust once that exists), because the
-player backtracks through their own tunnel to resurface and it has to stay
-consistent.
+mutations (carved cells), because the player backtracks through their own
+tunnel to resurface and it has to stay consistent.
+
+Collected dust needs **no set of its own**: a dust cell is collected iff
+it's both dug and in the dust field, i.e. `DUG` ∩ `sampleDust()`. The only
+dust state that persists is the running counter (`+1` per collected cell,
+plus a momentum top-up when the cell was DENSE).
 
 - **Delta overlay** (`DUG`): a `Set` of carved cells, string key
   `x + '_' + undergroundY`, both `CELL_SIZE`-aligned. Coordinates are in
@@ -211,10 +286,14 @@ consistent.
   the newly-exposed `CELL_SIZE` strip (sky above `SURFACE_Y`, else
   `DUG.has(cell)` ? tunnel : material colour). The 2× size is the lookahead
   margin that lets paging happen in occasional jumps, not every frame.
+  Dust is **not** in this buffer — its hue cycles globally, so a baked
+  colour would freeze per row as the buffer pages.
 - Drilling: `digShaft()` stamps a fixed-radius circle of cells each tick;
   `dig()` adds each new cell to `DUG` **and** immediately punches a hole in
   the MAP buffer, so a cell stays carved when you scroll away and back.
-  (Collecting dust at newly-carved cells is TODO.)
+  The once-per-cell `if (!DUG.has(key))` guard in `dig()` is where dust
+  collection hooks in: if the new cell is in the dust field, bump the
+  counter (and momentum, if DENSE) and spawn its fly-to-HUD particle.
 
 ## Open questions
 
@@ -228,6 +307,10 @@ consistent.
   (warning: heavy with animated gifs) for a survey of options.
 - Rock deflection behavior (once rock is added) — bounce angle, momentum
   cost, or both?
+- Dense-dust momentum boost: per collected cell, or capped per tick?
+  `digShaft()` clears many cells in one tick, so a plain per-cell boost
+  hands out a big jolt when the drill enters a dense patch. Ship per-cell,
+  tune later; revisit if the spike feels bad.
 - Depth-bias formula for the generator (see above) — not yet decided.
 - Endless generation is solved for *sequential* depth access (player only
   ever extends from the surface downward); no random-access-to-arbitrary-depth
