@@ -18,20 +18,21 @@ jobs:
     steps:
       # input branch
       - name: Checkout main branch
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       # output branch
       - name: Checkout Github Pages branch
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           ref: gh-pages
           path: gh-pages
         
       # setup runtime & dependencies
       - name: Setup Node
-        uses: actions/setup-node@v1
+        uses: actions/setup-node@v4
         with:
-          node-version: '14.x'
+          node-version: 'lts/*'
+          cache: 'npm'
 
       - name: Install dependencies
         run: npm install
