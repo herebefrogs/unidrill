@@ -43,18 +43,31 @@ for the reasoning behind each of these; this is just the sequencing.
       revisit the per-tick-cap (already noted in DESIGN Open questions) if
       it feels bad. Landing this retires the "no dust boosts implemented
       yet" paragraph in DESIGN.md's Win/lose.
-- [ ] Rainbow dust — carry penalty. DESIGN.md's core loop: "carrying more
-      dust drains momentum faster." Scale momentum decay (or drag) by the
-      `dust` count so a greedy deep run is more precarious on the way back.
-      Split from the "properties" item so it can be tuned against the
-      dense-dust boost in isolation.
 - [ ] Rainbow dust — visuals. (a) Palette rotation: every on-screen dust
       cell shares one hue cycled red→orange→yellow→green→blue→purple→red
       over time; render on a per-frame animation layer between the MAP blit
       and the HUD text — dust must NOT be baked into MAP. (b) Collection
       particles: on dig, spawn the cell's pixels in screen space, fly them
       to the HUD counter under linear acceleration, tick the counter on
-      arrival. See DESIGN.md "Graphics".
+      arrival. See DESIGN.md "Graphics". (c) Hit-stop: freeze the sim for a
+      few frames on dense-patch entry (first dense cell of a tick) — try it,
+      see if the jolt reads as juicier or just laggy. (d) Decide when the
+      dust counter increments: on collect (dig time) vs. on particle arrival
+      at the HUD. Arrival is juicier but opens an edge case — a full stop
+      (bingo fuel / resurface) with particles still in flight would score
+      those as uncollected. Options: settle in-flight particles instantly on
+      game-over, or just accept the counter as "delivered dust" and score
+      off that. Tie-break depends on whether surfacing-to-score survives.
+- [ ] Bingo-fuel warning. HUD alert when the player likely can't make it
+      back up. Approximate — we don't know the return path or the material
+      along it — so estimate against a straight climb decaying at the sand
+      rate: reachable distance ≈ `momentum^2 / (2 * (entropy + sandDrag))`
+      (momentum decays linearly to zero, so travel is the area under it).
+      Warn when that's below `depth`, plus a threshold band (warn while
+      within ~5–10% of the cutoff, before it's already lost). Tune the
+      decay rate used against playtests — tunnel-drag rate if backtracking
+      a dug shaft is the expected escape, sand rate if fresh digging up is
+      typical.
 - [ ] Add ROCK as a third material. Solid and undrillable — the drill can't
       carve it. On contact it deflects the player's heading (bounce) rather
       than stopping them dead. See DESIGN.md (materials, and the rock
@@ -109,3 +122,28 @@ for the reasoning behind each of these; this is just the sequencing.
 - [ ] Add gamepad support. There's prior art in Jerome's old veggie-ninja repo:
       https://github.com/herebefrogs/veggie-ninja/blob/master/src/js/gamepad.js
       (and possibly an older commit in gamejam-boilerplate's own history).
+
+## Won't do
+
+- Rainbow dust — carry penalty. DESIGN.md's old core-loop line said
+  "carrying more dust drains momentum faster"; the idea was to scale
+  momentum decay by the `dust` count so a greedy deep run is more
+  precarious on the return. Prototyped and dropped. What we found:
+  - A naive per-cell drag term made the game brutally hard — the terrain
+    already decays you continuously, so this was a second, always-on drag
+    stacked on top ("double drag").
+  - Zeroing SAND drag to make room for it helped, but turned the game into
+    a different, more punishing thing and made clay patches near-instant
+    death.
+  - It actively fought the dense-dust boost: a dense patch sped you up and
+    permanently loaded you down in the same pass, so the boost stopped
+    reading as a reward.
+  - Capping the carry term kept it playable but exposed the real problem —
+    a capped penalty is just a one-time tax on your first ~40 dust, after
+    which it's the no-penalty game again, so the mechanic isn't even
+    load-bearing.
+  Fundamentally a carry penalty punishes the player for collecting, when
+  the whole game is about wanting them to collect as much as possible. The
+  no-penalty version — pure momentum management, drag from terrain only,
+  speed from dense dust — is simpler and more intuitive: one source of
+  slowdown (terrain), one source of speed (dust). Keeping that.

@@ -36,8 +36,12 @@ back to the surface with what you've got before you run out of momentum.**
   cells packed in a jittered blob). Dust is an **orthogonal field** laid
   over the terrain — it sits on sand and clay alike, it is not a third
   material. A dense patch is the only thing that tops momentum back up.
-- Carrying more dust drains momentum faster — the deeper/greedier you go,
-  the more precarious the trip back.
+- Collecting dust carries no weight penalty — it's pure upside. The cost of
+  a greedy deep run is only the extra terrain drag over the longer route
+  there and back, and the risk of not threading enough dense patches to
+  keep momentum up. One source of slowdown (terrain), one source of speed
+  (dense dust). (A dust-count carry drag was prototyped and rejected — see
+  TODO.md "Won't do".)
 
 ## Win / lose
 
