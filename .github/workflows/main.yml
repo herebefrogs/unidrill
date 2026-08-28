@@ -8,6 +8,11 @@ on:
   push:
     branches: [ main ]
 
+# GITHUB_TOKEN defaults to read-only on repos created after Feb 2023;
+# the gh-pages push step needs write access to contents.
+permissions:
+  contents: write
+
 jobs:
   # workflow contains a single job called "build"
   build:
