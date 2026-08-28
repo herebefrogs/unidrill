@@ -22,6 +22,10 @@
    rather than guessing — saves both of us time and avoids disappointment.
    Only raise the big/consequential calls this way; don't ask about trivial
    details (constants, naming, minor tuning) that are cheap to adjust after.
+ - When an implementation choice contradicts `DESIGN.md`, update the relevant
+   sections of that doc directly to match what was actually built. Don't keep
+   a changelog or note what changed — just make the doc describe the current
+   design.
 
 ## Game engine
 

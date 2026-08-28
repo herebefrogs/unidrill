@@ -16,11 +16,43 @@ for the reasoning behind each of these; this is just the sequencing.
       backtracking doesn't lose dug-location history.
 - [x] Start tracking player velocity and angle: switch to real controls
       (left/right banks the drill left/right, applied to angle).
-- [ ] Handle colliding with the vertical edges of the map.
+- [x] Handle colliding with the vertical edges of the map. (Currently a
+      hard clamp of `hero.x` to the viewport width in `moveHero()` — no
+      horizontal camera panning yet, so viewport edge == map edge for now.)
 - [ ] Momentum / entropy / material drag.
+- [ ] Add ROCK as a third material. Solid and undrillable — the drill can't
+      carve it. On contact it deflects the player's heading (bounce) rather
+      than stopping them dead. See DESIGN.md (materials, and the rock
+      deflection open question).
 - [ ] Rainbow dust.
-- [ ] Camera window tracking (smoothing/lookahead — see DESIGN.md's open
-      question on camera tracking).
+- [ ] Horizontal camera panning. Camera x is pinned to 0 right now
+      (`followCamera()` only touches y; `updateCameraWindow()` has x logic
+      but is never called). Needed before edge collision can clamp to the
+      real map edge instead of the viewport.
+- [ ] Camera tracking: position-locking + lerp-smoothing. Camera aims to
+      hold the player at the exact screen center, but lets them drift away
+      temporarily (e.g. a dense-dust velocity boost) and each frame lerps
+      the center-to-player gap back down toward zero. See DESIGN.md's open
+      question on camera tracking.
+- [ ] RNG seeds. Give the underground generation its own seeded RNG,
+      initialized from the string `JS13K2026`. Nothing else may draw from
+      the underground RNG — if some other system needs randomness, spin up
+      a separate generator for it. Title screen needs a "share your seed"
+      option (there's a helper in src/js/share.js) and a way to generate
+      fresh seeds for replayability. Ship a few hand-picked seeds too:
+      `JS13K2026`, `RAINBOWS`, `UNICORNS`.
+- [ ] Highscore. Using the storage helper (src/js/storage.js) under key
+      `2026.unidrill`, keep a hash of `{ highscore, date }` keyed by seed.
+      Lets us show a highscore list and let the player reload a past seed
+      to try to beat their score. (Storage helper prefix is currently
+      hardcoded to `2020.workingTitle` — needs updating.)
+
+## Bugs
+
+- [ ] Player continues upward into the sky past the surface line.
+- [ ] In portrait screen ratio, the canvas should use the whole screen to
+      show as much of the underground as possible. Revisit the locked-ratio
+      logic then — it may be wrong regardless of screen orientation.
 
 ## Later / revisit
 
