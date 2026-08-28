@@ -28,7 +28,9 @@
    alone is a safe "does it bundle?" check.
 
  Leave this section better than you found it — if a fresh session would have
- been faster knowing something, add it here before `/clear`.
+ been faster knowing something, add it here before `/clear`. The `/handoff`
+ skill does this (plus memories, `TODO.md`, `DESIGN.md`); run it when a TODO
+ item wraps or the user is about to clear.
 
  ## Communication style
 
