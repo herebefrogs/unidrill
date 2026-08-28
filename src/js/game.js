@@ -100,6 +100,45 @@ const MAP = c.cloneNode();              // static elements of the map/world cach
 const MAP_CTX = MAP.getContext('2d');
 MAP.width = 2560;                       // map size, same as backbuffer
 MAP.height = 1920;
+// dust-cell shapes only (opaque white on transparent), paged in lockstep
+// with MAP by scrollMap(). Hue is applied per-frame in renderDust() so every
+// on-screen dust cell can share one globally-cycling colour - baking it into
+// MAP wouldn't work, MAP freezes each row's colours as the buffer pages.
+const DUST_MASK = c.cloneNode();
+const DUST_MASK_CTX = DUST_MASK.getContext('2d');
+DUST_MASK.width = 2560;
+DUST_MASK.height = 1920;
+// per-frame scratch: the camera slice of DUST_MASK recoloured to the current
+// hue (source-in fill), then composited onto BUFFER. Camera-sized, not
+// buffer-sized - only the visible slice is ever tinted.
+const DUST_LAYER = c.cloneNode();
+const DUST_LAYER_CTX = DUST_LAYER.getContext('2d');
+DUST_LAYER.width = CAMERA_WIDTH;
+DUST_LAYER.height = CAMERA_HEIGHT;
+// dust palette cycling: every on-screen dust cell is filled with one swatch
+// from DUST_PALETTE, and the active index advances over time so the whole
+// field steps through the palette together (classic palette rotation). One
+// full loop takes DUST_CYCLE ms. Hand-picked hex, not computed from HSL, so
+// each swatch can be nudged on its own - in particular the yellow/green/cyan
+// entries are held darker than a flat-lightness HSL sweep would make them,
+// which is what was reading as jarring. 7 rainbow hues + 7 blends between.
+const DUST_CYCLE = 8000;
+const DUST_PALETTE = [
+  '#e0403a', // red
+  '#d85f2a', // red-orange
+  '#c07636', // orange
+  '#a67d3c', // amber
+  '#7c8a3c', // yellow-green
+  '#55913f', // green
+  '#3c8a6a', // teal
+  '#3a8296', // cyan
+  '#3d78ac', // cyan-blue
+  '#4d69c8', // blue
+  '#6a5cc8', // blue-violet
+  '#8450b4', // violet
+  '#a8489c', // magenta
+  '#c9506f', // pink-red
+];
 const TEXT = initTextBuffer(c, CAMERA_WIDTH, CAMERA_HEIGHT);  // text buffer
 
 
@@ -473,6 +512,9 @@ function dig(x, undergroundY) {
     DUG.add(key);
     MAP_CTX.fillStyle = TUNNEL_COLOR;
     MAP_CTX.fillRect(x, undergroundY + SURFACE_Y - mapOffset, CELL_SIZE, CELL_SIZE);
+    // stop this cell shimmering now it's collected; paintRow()'s !dug check
+    // keeps it clear when the row pages away and back
+    DUST_MASK_CTX.clearRect(x, undergroundY + SURFACE_Y - mapOffset, CELL_SIZE, CELL_SIZE);
     // collection = DUG ∩ sampleDust, so a cell counts the first (only) time
     // it's dug. +1 per cell regardless of category - "dense yields more" is
     // already delivered by dense patches being solid vs sparse's ~25% mask.
@@ -506,12 +548,22 @@ function followCamera() {
 // Keeps hero/camera pointing at the same underground spot they were before.
 function scrollMap(dy) {
   if (!dy) return;
+  // 'copy' so the (partly transparent) dust mask overwrites itself cleanly on
+  // the self-blit - source-over would leave the old dust showing through the
+  // gaps. It also wipes the newly-exposed strip to transparent, which the
+  // paintRow() calls below then restamp.
   if (dy > 0) {
     MAP_CTX.drawImage(MAP, 0, dy, MAP.width, MAP.height - dy, 0, 0, MAP.width, MAP.height - dy);
+    DUST_MASK_CTX.globalCompositeOperation = 'copy';
+    DUST_MASK_CTX.drawImage(DUST_MASK, 0, dy, MAP.width, MAP.height - dy, 0, 0, MAP.width, MAP.height - dy);
+    DUST_MASK_CTX.globalCompositeOperation = 'source-over';
     mapOffset += dy;
     for (let y = MAP.height - dy; y < MAP.height; y += CELL_SIZE) paintRow(y);
   } else {
     MAP_CTX.drawImage(MAP, 0, 0, MAP.width, MAP.height + dy, 0, -dy, MAP.width, MAP.height + dy);
+    DUST_MASK_CTX.globalCompositeOperation = 'copy';
+    DUST_MASK_CTX.drawImage(DUST_MASK, 0, 0, MAP.width, MAP.height + dy, 0, -dy, MAP.width, MAP.height + dy);
+    DUST_MASK_CTX.globalCompositeOperation = 'source-over';
     mapOffset += dy;
     for (let y = 0; y < -dy; y += CELL_SIZE) paintRow(y);
   }
@@ -551,6 +603,7 @@ function render() {
       // clear backbuffer by drawing static map elements
       // TODO could also just draw the camera visible portion of the map
       BUFFER_CTX.drawImage(MAP, 0, 0, BUFFER.width, BUFFER.height);
+      renderDust();
       BUFFER_CTX.fillStyle = '#2255ee';
       BUFFER_CTX.fillRect(hero.x, hero.y, hero.w, hero.h);
       renderText('game screen', CHARSET_SIZE, CHARSET_SIZE);
@@ -566,6 +619,7 @@ function render() {
       // flat wipe, and the player sees where they ran out); just overlay
       // the outcome text.
       BUFFER_CTX.drawImage(MAP, 0, 0, BUFFER.width, BUFFER.height);
+      renderDust();
       BUFFER_CTX.fillStyle = '#2255ee';
       BUFFER_CTX.fillRect(hero.x, hero.y, hero.w, hero.h);
       renderText(outcome ? 'rainbow!' : 'out of momentum', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2, ALIGN_CENTER);
@@ -577,6 +631,28 @@ function render() {
   }
 
   blit();
+};
+
+// dust animation layer: recolour the camera slice of DUST_MASK to the current
+// cycling hue and composite it over BUFFER, between the MAP blit and the hero.
+// Fixed cost regardless of how much dust is on screen - 2 camera-sized
+// drawImages + 1 fill, no per-cell work (that all happened at paint time).
+function renderDust() {
+  const swatch = DUST_PALETTE[Math.floor(currentTime / DUST_CYCLE * DUST_PALETTE.length) % DUST_PALETTE.length];
+  // integer-align the camera rect: dust takes an extra round trip the MAP
+  // blit doesn't (lift to (0,0), tint, place back), so a fractional cameraY
+  // would snap differently on each hop and the dust would crawl ±1px against
+  // the terrain as you scroll. Same int on lift and place = exact world pos.
+  const cx = Math.floor(cameraX), cy = Math.floor(cameraY);
+  // 'copy': lift the visible slice of the mask, discarding last frame's tint
+  DUST_LAYER_CTX.globalCompositeOperation = 'copy';
+  DUST_LAYER_CTX.drawImage(DUST_MASK, cx, cy, CAMERA_WIDTH, CAMERA_HEIGHT, 0, 0, CAMERA_WIDTH, CAMERA_HEIGHT);
+  // 'source-in': paint the hue only where the mask is opaque
+  DUST_LAYER_CTX.globalCompositeOperation = 'source-in';
+  DUST_LAYER_CTX.fillStyle = swatch;
+  DUST_LAYER_CTX.fillRect(0, 0, CAMERA_WIDTH, CAMERA_HEIGHT);
+  DUST_LAYER_CTX.globalCompositeOperation = 'source-over';
+  BUFFER_CTX.drawImage(DUST_LAYER, 0, 0, CAMERA_WIDTH, CAMERA_HEIGHT, cx, cy, CAMERA_WIDTH, CAMERA_HEIGHT);
 };
 
 function renderEntity(entity, ctx = BUFFER_CTX) {
@@ -599,19 +675,23 @@ function debugCameraWindow() {
 // below - shared by the initial full paint and scrollMap's incremental one
 function paintRow(y) {
   const underground = y - SURFACE_Y + mapOffset;
+  // dust rides its own transparent-backed buffer, so - unlike MAP, which
+  // fills every cell opaquely - this strip must be cleared before restamping,
+  // or scrolled-away dust ghosts back in. sampleDust category (SPARSE/DENSE)
+  // is irrelevant to the render: yield difference is already carried by the
+  // physical fill (dense = solid patch, sparse = ~25% dither), colour is one
+  // shared cycling hue. Collected cells (DUG) are skipped so they stop
+  // shimmering once dug, and stay skipped when this row pages back in.
+  DUST_MASK_CTX.clearRect(0, y, MAP.width, CELL_SIZE);
+  DUST_MASK_CTX.fillStyle = '#fff';
   for (let x = 0; x < MAP.width; x += CELL_SIZE) {
     const dug = DUG.has(x + '_' + underground);
-    let color = underground < 0 ? SKY_COLOR : dug ? TUNNEL_COLOR : materialColor(sampleMaterial(x, underground));
-    // TEMP: dust-distribution debug tint, baked straight into MAP so we can
-    // eyeball the sampleDust() field. The real dust render (palette rotation
-    // + fly-to-HUD particles) belongs on a per-frame animation layer and
-    // must NOT be baked — see the "Rainbow dust — visuals" TODO.
-    if (underground >= 0 && !dug) {
-      const dust = sampleDust(x, underground);
-      if (dust !== DUST_NONE) color = dust === DUST_DENSE ? '#e00' : '#f77';
-    }
+    const color = underground < 0 ? SKY_COLOR : dug ? TUNNEL_COLOR : materialColor(sampleMaterial(x, underground));
     MAP_CTX.fillStyle = color;
     MAP_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+    if (underground >= 0 && !dug && sampleDust(x, underground) !== DUST_NONE) {
+      DUST_MASK_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+    }
   }
 };
 
@@ -666,7 +746,7 @@ onresize = onrotate = function() {
   c.height = BUFFER.height * scaleToFit;
 
   // disable smoothing on image scaling
-  CTX.imageSmoothingEnabled = MAP_CTX.imageSmoothingEnabled = BUFFER_CTX.imageSmoothingEnabled = false;
+  CTX.imageSmoothingEnabled = MAP_CTX.imageSmoothingEnabled = BUFFER_CTX.imageSmoothingEnabled = DUST_MASK_CTX.imageSmoothingEnabled = DUST_LAYER_CTX.imageSmoothingEnabled = false;
 
   // fix key events not received on itch.io when game loads in full screen
   window.focus();

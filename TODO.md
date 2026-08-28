@@ -43,10 +43,13 @@ for the reasoning behind each of these; this is just the sequencing.
       revisit the per-tick-cap (already noted in DESIGN Open questions) if
       it feels bad. Landing this retires the "no dust boosts implemented
       yet" paragraph in DESIGN.md's Win/lose.
-- [ ] Rainbow dust — visuals. (a) Palette rotation: every on-screen dust
-      cell shares one hue cycled red→orange→yellow→green→blue→purple→red
-      over time; render on a per-frame animation layer between the MAP blit
-      and the HUD text — dust must NOT be baked into MAP. (b) Collection
+- [ ] Rainbow dust — visuals. (a) DONE — Palette rotation: `DUST_MASK`
+      buffer holds dust-cell shapes (paged like MAP, stamped by paintRow,
+      cleared by dig); `renderDust()` recolours the camera slice per frame
+      via `source-in` fill and composites between the MAP blit and hero.
+      Steps through `DUST_PALETTE` (14 hand-picked swatches) rather than a
+      continuous hue sweep. Colour tuning is a playtest item below. (b)
+      Collection
       particles: on dig, spawn the cell's pixels in screen space, fly them
       to the HUD counter under linear acceleration, tick the counter on
       arrival. See DESIGN.md "Graphics". (c) Hit-stop: freeze the sim for a
@@ -105,6 +108,16 @@ for the reasoning behind each of these; this is just the sequencing.
       show as much of the underground as possible. Revisit the locked-ratio
       logic then — it may be wrong regardless of screen orientation.
 
+## Playtest / gameplay balancing
+
+- [ ] Rainbow dust palette (`DUST_PALETTE` in game.js). The 14 swatches are
+      currently held dark/desaturated to kill the blinding yellow-green-cyan
+      band — went too far the other way, they now read muted. Spend a session
+      tuning each entry for "rainbow bright but not blinding": vivid and
+      saturated enough to feel like rainbow dust, luminance flat enough
+      across the cycle that no step flares. Also revisit `DUST_CYCLE` (cycle
+      duration) and the count of swatches while in there.
+
 ## Later / revisit
 
 - [ ] Depth is currently displayed in raw pixels. Should be in meters, but we
@@ -122,6 +135,24 @@ for the reasoning behind each of these; this is just the sequencing.
 - [ ] Add gamepad support. There's prior art in Jerome's old veggie-ninja repo:
       https://github.com/herebefrogs/veggie-ninja/blob/master/src/js/gamepad.js
       (and possibly an older commit in gamejam-boilerplate's own history).
+
+## Ideas — not yet designed
+
+Half-formed; each needs a design pass before it becomes a build item.
+
+- [ ] Upgrade picks. Every X dust collected, pause the game and offer 2–3
+      upgrade options to choose from (roguelite-style). X, the option pool,
+      and what the upgrades do are all TBD. Open: does a mid-dive pause
+      break the one-decision-per-second push-your-luck tension, or add a
+      welcome second layer of choice? Run-scoped or meta-progression across
+      runs?
+- [ ] Underground creatures. Would baddies improve the game — worms,
+      centipedes, beetles, leprechauns? Completely unformed: brainstorm how
+      they weave into the momentum loop (obstacle that costs momentum?
+      steals dust? chases you on the ascent? a leprechaun guarding a dense
+      patch?) before it's worth prototyping. Risk: the game's pleasure is
+      carving your own path — anything that demands twitch dodging could
+      fight that.
 
 ## Won't do
 
