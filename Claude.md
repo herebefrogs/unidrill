@@ -1,3 +1,35 @@
+ ## Orientation (read first — for a fresh session)
+
+ `DESIGN.md` = current design (living doc, keep in sync). `TODO.md` =
+ build sequencing + known bugs. Then the code that matters:
+
+ | File | What's in it |
+ |---|---|
+ | `src/js/game.js` | **Everything gameplay**: RAF loop, the 3 screens (TITLE/GAME/END), `hero` state + `moveHero()` + momentum/drag + win-lose, camera follow, the `MAP` buffer paging (`scrollMap`/`paintRow`), digging (`digShaft`/`dig`/`DUG`), all rendering, input dispatch (`processInputs`). |
+ | `src/js/terrain.js` | Pure procedural terrain: `sampleMaterial(x,y)` (macro sections + rock-blob pass), `CELL_SIZE`, materials `SAND`/`CLAY`, `MATERIAL_COLOR`, `MATERIAL_DRAG`. Nothing stored — recomputed on demand. |
+ | `src/js/inputs/keyboard.js`, `inputs/pointer.js` | Raw input capture only (see Game engine below). `pointer.js`'s drag-direction logic is deliberately unusual — ask before touching. |
+ | `src/js/text.js` | Bitmap text (`renderText`, `CHARSET_SIZE`, `ALIGN_*`). |
+ | `src/js/utils.js` | Seeded PRNG, `lerp`, `clamp`, `loadImg`. |
+ | `src/js/{share,storage,sound,speech,mobile,monetization}.js` | Boilerplate helpers, mostly unused so far — wire in as TODO items reach them. |
+
+ Concepts that bite if you miss them:
+
+ - **Two coordinate spaces.** World space (canvas pixels) vs *underground
+   space* (`y - SURFACE_Y + mapOffset`). `DUG` keys and `sampleMaterial`'s
+   `y` are underground-space; `hero.x/y` are world-space.
+ - **`depth` is the only reliable "how far underground" measure.** Don't
+   compare `hero.y` to `SURFACE_Y` — `scrollMap()` mutates `hero.y`,
+   `cameraY` and `mapOffset` together, so world-space `hero.y` drifts while
+   `depth` stays invariant.
+ - **The `MAP` buffer is paged, never rebuilt.** `scrollMap()` self-blits by
+   the scroll delta and `paintRow()` repaints only the newly exposed strip.
+ - **Build:** the user keeps `npm start` running in another terminal (see
+   memory). Don't run `npm run build` while it's live. `npm run build:js`
+   alone is a safe "does it bundle?" check.
+
+ Leave this section better than you found it — if a fresh session would have
+ been faster knowing something, add it here before `/clear`.
+
  ## Communication style
 
  - Prefer diagrams over prose whenever the subject has structure: tree/parent-child
