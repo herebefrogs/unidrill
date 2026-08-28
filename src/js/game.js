@@ -349,6 +349,11 @@ function processInputs() {
       // drill always thrusts forward along hero.angle (see moveHero) -
       // there's no throttle. Left/right bank the angle by a rate; a pointer
       // drag replaces the angle outright with the drag direction.
+      // Sign note: banking is optimised for the DOWNWARD leg - pressing Left
+      // curves the drill toward screen-left while descending (angle += , i.e.
+      // counter-clockwise-from-"down" in y-down screen space). It reads
+      // inverted on the climb back up; that's unavoidable with a bank model
+      // and the player re-inverts their inputs naturally on the way up.
       if (isPointerDown()) {
         const [vX, vY] = pointerDirection();
         if (vX || vY) hero.angle = Math.atan2(vY, vX);
@@ -362,8 +367,8 @@ function processInputs() {
           'ArrowRight',
           'KeyD'
         );
-        if (hero.moveLeft) hero.angle -= TURN_SPEED * elapsedTime;
-        if (hero.moveRight) hero.angle += TURN_SPEED * elapsedTime;
+        if (hero.moveLeft) hero.angle += TURN_SPEED * elapsedTime;
+        if (hero.moveRight) hero.angle -= TURN_SPEED * elapsedTime;
       }
       break;
     case END_SCREEN:
