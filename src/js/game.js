@@ -44,9 +44,14 @@ const CAMERA_WIDTH = 1280;              // camera/viewport size
 const CAMERA_HEIGHT = 960;
 const SURFACE_Y = CAMERA_HEIGHT / 2;    // world y of ground level; hero starts here, underground gen starts below it
 const SKY_COLOR = '#9fd8ff';
+const TUNNEL_COLOR = '#000';            // dug-out cell below the surface line
 // underground-y (SURFACE_Y-relative, see paintRow) that MAP buffer row 0
 // currently represents; scrollMap() advances this as the buffer gets paged
 let mapOffset = 0;
+// cells dug out so far, keyed by 'x_undergroundY' (both CELL_SIZE-aligned).
+// Set persists across scrolling so backtracking through a dug shaft doesn't
+// regenerate solid material - see dig()/paintRow().
+const DUG = new Set();
 
 hero = {
   x: CAMERA_WIDTH / 2 - HERO_W / 2,
@@ -98,6 +103,7 @@ function startGame() {
   konamiIndex = 0;
   cameraX = cameraY = 0;
   mapOffset = 0;
+  DUG.clear();
   hero = {
     x: CAMERA_WIDTH / 2 - HERO_W / 2,
     y: SURFACE_Y - HERO_H,          // feet on the ground, not center
@@ -367,6 +373,7 @@ function update() {
 
   if (screen === GAME_SCREEN) {
     moveHero();
+    digShaft();
     followCamera();
   }
 };
@@ -377,6 +384,31 @@ function moveHero() {
   // blocked in processInputs() by gating hero.moveUp on depth > 0.
   hero.y += hero.velY * HERO_SPEED * elapsedTime;
   depth = Math.max(0, Math.round(hero.y + hero.h - SURFACE_Y + mapOffset));
+}
+
+// temporary: there's no real drilling shape/direction yet (TODO item 5), so
+// the hero just digs out whatever cells it's currently standing in, every
+// frame - with the current up/down-only controls that always produces a
+// straight vertical shaft. Good enough to prove DUG survives backtracking.
+function digShaft() {
+  const top = hero.y - SURFACE_Y + mapOffset;
+  for (let x = Math.floor(hero.x / CELL_SIZE) * CELL_SIZE; x < hero.x + hero.w; x += CELL_SIZE) {
+    for (let y = Math.max(0, Math.floor(top / CELL_SIZE) * CELL_SIZE); y < top + hero.h; y += CELL_SIZE) {
+      dig(x, y);
+    }
+  }
+}
+
+// mark one CELL_SIZE cell as dug (x, undergroundY both CELL_SIZE-aligned) and
+// punch the hole into the MAP buffer right away. paintRow() also consults
+// DUG so a previously dug cell stays dug after scrolling away and back.
+function dig(x, undergroundY) {
+  const key = x + '_' + undergroundY;
+  if (!DUG.has(key)) {
+    DUG.add(key);
+    MAP_CTX.fillStyle = TUNNEL_COLOR;
+    MAP_CTX.fillRect(x, undergroundY + SURFACE_Y - mapOffset, CELL_SIZE, CELL_SIZE);
+  }
 }
 
 // kept as its own step, decoupled from moveHero(): the camera only ever
@@ -484,7 +516,7 @@ function debugCameraWindow() {
 function paintRow(y) {
   const underground = y - SURFACE_Y + mapOffset;
   for (let x = 0; x < MAP.width; x += CELL_SIZE) {
-    MAP_CTX.fillStyle = underground < 0 ? SKY_COLOR : materialColor(sampleMaterial(x, underground));
+    MAP_CTX.fillStyle = underground < 0 ? SKY_COLOR : DUG.has(x + '_' + underground) ? TUNNEL_COLOR : materialColor(sampleMaterial(x, underground));
     MAP_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
   }
 };
