@@ -101,44 +101,60 @@ const MAP_CTX = MAP.getContext('2d');
 MAP.width = 2560;                       // map size, same as backbuffer
 MAP.height = 1920;
 // dust-cell shapes only (opaque white on transparent), paged in lockstep
-// with MAP by scrollMap(). Hue is applied per-frame in renderDust() so every
-// on-screen dust cell can share one globally-cycling colour - baking it into
-// MAP wouldn't work, MAP freezes each row's colours as the buffer pages.
+// with MAP by scrollMap(). Colour is applied per-frame in renderDust() by
+// masking a drifting rainbow through these shapes - baking it into MAP
+// wouldn't work, MAP freezes each row's colours as the buffer pages.
 const DUST_MASK = c.cloneNode();
 const DUST_MASK_CTX = DUST_MASK.getContext('2d');
 DUST_MASK.width = 2560;
 DUST_MASK.height = 1920;
-// per-frame scratch: the camera slice of DUST_MASK recoloured to the current
-// hue (source-in fill), then composited onto BUFFER. Camera-sized, not
-// buffer-sized - only the visible slice is ever tinted.
+// per-frame scratch: the camera slice of DUST_MASK, masked against
+// DUST_GRADIENT (source-in), then composited onto BUFFER. Camera-sized, not
+// buffer-sized - only the visible slice is ever coloured.
 const DUST_LAYER = c.cloneNode();
 const DUST_LAYER_CTX = DUST_LAYER.getContext('2d');
 DUST_LAYER.width = CAMERA_WIDTH;
 DUST_LAYER.height = CAMERA_HEIGHT;
-// dust palette cycling: every on-screen dust cell is filled with one swatch
-// from DUST_PALETTE, and the active index advances over time so the whole
-// field steps through the palette together (classic palette rotation). One
-// full loop takes DUST_CYCLE ms. Hand-picked hex, not computed from HSL, so
-// each swatch can be nudged on its own - in particular the yellow/green/cyan
-// entries are held darker than a flat-lightness HSL sweep would make them,
-// which is what was reading as jarring. 7 rainbow hues + 7 blends between.
-const DUST_CYCLE = 8000;
+// dust colour comes from a repeating diagonal rainbow (top-left -> bottom-
+// right) that the dust mask samples. It is anchored to UNDERGROUND position
+// (renderDust offsets it by the camera's underground origin) plus a steady
+// time-driven phase, so the rainbow drifts across the terrain at a constant
+// rate that is independent of how fast the player is descending. Banded, not
+// smooth - steps through DUST_PALETTE. Hand-picked hex, not computed from
+// HSL, so each swatch can be nudged on its own; kept a touch muted (esp.
+// yellow) so no band flares. The 7 rainbow colours, no blends.
+const DUST_BAND = 40;                   // px along the diagonal per colour band
+const DUST_SPEED = 56;                  // px/sec the rainbow drifts (constant, not tied to descent). A divisor of DUST_P (280): a point cycles the full palette in a round 5s and the phase wraps exactly on a band boundary.
 const DUST_PALETTE = [
   '#e0403a', // red
-  '#d85f2a', // red-orange
-  '#c07636', // orange
-  '#a67d3c', // amber
-  '#7c8a3c', // yellow-green
+  '#d97b32', // orange
+  '#be9a38', // yellow
   '#55913f', // green
-  '#3c8a6a', // teal
-  '#3a8296', // cyan
-  '#3d78ac', // cyan-blue
-  '#4d69c8', // blue
-  '#6a5cc8', // blue-violet
+  '#3f77b8', // blue
+  '#4b52a8', // indigo
   '#8450b4', // violet
-  '#a8489c', // magenta
-  '#c9506f', // pink-red
 ];
+// bake one seamless tile of the diagonal rainbow, used as a repeating
+// pattern. The tile is DUST_P square - an exact whole number of colour bands
+// each way - so f(x+y) is periodic across the edges and 'repeat' shows no
+// seam. Rotate the context 45deg and lay down vertical stripes: in tile
+// space they become bands of constant (x+y), i.e. the ↘ gradient.
+const DUST_P = DUST_BAND * DUST_PALETTE.length;
+const DUST_GRADIENT = c.cloneNode();
+DUST_GRADIENT.width = DUST_GRADIENT.height = DUST_P;
+{
+  const g = DUST_GRADIENT.getContext('2d');
+  const L = DUST_PALETTE.length;
+  const sw = DUST_BAND / Math.SQRT2;             // stripe width in the rotated frame
+  const span = DUST_P * 2;                       // > the rotated tile's diagonal reach
+  g.translate(DUST_P / 2, DUST_P / 2);
+  g.rotate(Math.PI / 4);
+  for (let i = -Math.ceil(span / sw); i <= Math.ceil(span / sw); i++) {
+    g.fillStyle = DUST_PALETTE[((i % L) + L) % L];
+    g.fillRect(Math.floor(i * sw), -span, Math.ceil(sw) + 1, 2 * span);  // +1: overlap, kills hairline seams
+  }
+}
+const DUST_PATTERN = DUST_LAYER_CTX.createPattern(DUST_GRADIENT, 'repeat');
 const TEXT = initTextBuffer(c, CAMERA_WIDTH, CAMERA_HEIGHT);  // text buffer
 
 
@@ -633,24 +649,35 @@ function render() {
   blit();
 };
 
-// dust animation layer: recolour the camera slice of DUST_MASK to the current
-// cycling hue and composite it over BUFFER, between the MAP blit and the hero.
-// Fixed cost regardless of how much dust is on screen - 2 camera-sized
-// drawImages + 1 fill, no per-cell work (that all happened at paint time).
+// dust colour layer: lift the camera slice of DUST_MASK, colour it by masking
+// the diagonal rainbow through it, composite over BUFFER between the MAP blit
+// and the hero. Fixed cost regardless of how much dust is on screen - 2
+// camera-sized drawImages + 1 pattern fill, no per-cell work (that all
+// happened at paint time).
 function renderDust() {
-  const swatch = DUST_PALETTE[Math.floor(currentTime / DUST_CYCLE * DUST_PALETTE.length) % DUST_PALETTE.length];
   // integer-align the camera rect: dust takes an extra round trip the MAP
-  // blit doesn't (lift to (0,0), tint, place back), so a fractional cameraY
+  // blit doesn't (lift to (0,0), colour, place back), so a fractional cameraY
   // would snap differently on each hop and the dust would crawl ±1px against
   // the terrain as you scroll. Same int on lift and place = exact world pos.
   const cx = Math.floor(cameraX), cy = Math.floor(cameraY);
-  // 'copy': lift the visible slice of the mask, discarding last frame's tint
+  // 'copy': lift the visible slice of the mask, discarding last frame
   DUST_LAYER_CTX.globalCompositeOperation = 'copy';
   DUST_LAYER_CTX.drawImage(DUST_MASK, cx, cy, CAMERA_WIDTH, CAMERA_HEIGHT, 0, 0, CAMERA_WIDTH, CAMERA_HEIGHT);
-  // 'source-in': paint the hue only where the mask is opaque
+  // 'source-in': keep the rainbow only where the mask is opaque. The pattern
+  // is offset by the camera's UNDERGROUND origin (mod tile size) so it tracks
+  // the terrain, plus a steady time phase so it also drifts at a constant
+  // rate. Underground y of scratch row 0 is (cy - SURFACE_Y + mapOffset), x
+  // is cx. Phase is floored to whole px - integer offsets keep the pattern
+  // pixel-aligned (smoothing is off), so it scrolls in crisp 1px steps.
+  const phase = Math.floor(currentTime * DUST_SPEED / 1000);
+  const tx = -(((cx % DUST_P) + DUST_P) % DUST_P);
+  const ty = -((((cy - SURFACE_Y + mapOffset + phase) % DUST_P) + DUST_P) % DUST_P);
   DUST_LAYER_CTX.globalCompositeOperation = 'source-in';
-  DUST_LAYER_CTX.fillStyle = swatch;
-  DUST_LAYER_CTX.fillRect(0, 0, CAMERA_WIDTH, CAMERA_HEIGHT);
+  DUST_LAYER_CTX.fillStyle = DUST_PATTERN;
+  DUST_LAYER_CTX.save();
+  DUST_LAYER_CTX.translate(tx, ty);
+  DUST_LAYER_CTX.fillRect(-tx, -ty, CAMERA_WIDTH, CAMERA_HEIGHT);
+  DUST_LAYER_CTX.restore();
   DUST_LAYER_CTX.globalCompositeOperation = 'source-over';
   BUFFER_CTX.drawImage(DUST_LAYER, 0, 0, CAMERA_WIDTH, CAMERA_HEIGHT, cx, cy, CAMERA_WIDTH, CAMERA_HEIGHT);
 };

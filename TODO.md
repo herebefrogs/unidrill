@@ -43,13 +43,14 @@ for the reasoning behind each of these; this is just the sequencing.
       revisit the per-tick-cap (already noted in DESIGN Open questions) if
       it feels bad. Landing this retires the "no dust boosts implemented
       yet" paragraph in DESIGN.md's Win/lose.
-- [ ] Rainbow dust — visuals. (a) DONE — Palette rotation: `DUST_MASK`
-      buffer holds dust-cell shapes (paged like MAP, stamped by paintRow,
-      cleared by dig); `renderDust()` recolours the camera slice per frame
-      via `source-in` fill and composites between the MAP blit and hero.
-      Steps through `DUST_PALETTE` (14 hand-picked swatches) rather than a
-      continuous hue sweep. Colour tuning is a playtest item below. (b)
-      Collection
+- [ ] Rainbow dust — visuals. (a) DONE — `DUST_MASK` buffer holds dust-cell
+      shapes (paged like MAP, stamped by paintRow, cleared by dig);
+      `renderDust()` colours the camera slice per frame by `source-in`-
+      masking a repeating diagonal rainbow (`DUST_PALETTE`, 7 hues,
+      `DUST_BAND` px/band) through it, composited between the MAP blit and
+      hero. Rainbow is anchored to underground position + a constant time
+      drift (`DUST_SPEED`), so it's decoupled from descent speed. Colour
+      tuning is a playtest item below. (b) Collection
       particles: on dig, spawn the cell's pixels in screen space, fly them
       to the HUD counter under linear acceleration, tick the counter on
       arrival. See DESIGN.md "Graphics". (c) Hit-stop: freeze the sim for a
@@ -110,13 +111,13 @@ for the reasoning behind each of these; this is just the sequencing.
 
 ## Playtest / gameplay balancing
 
-- [ ] Rainbow dust palette (`DUST_PALETTE` in game.js). The 14 swatches are
+- [ ] Rainbow dust palette (`DUST_PALETTE` in game.js). The 7 swatches are
       currently held dark/desaturated to kill the blinding yellow-green-cyan
-      band — went too far the other way, they now read muted. Spend a session
-      tuning each entry for "rainbow bright but not blinding": vivid and
-      saturated enough to feel like rainbow dust, luminance flat enough
-      across the cycle that no step flares. Also revisit `DUST_CYCLE` (cycle
-      duration) and the count of swatches while in there.
+      flare — went a touch far the other way, they read a little muted. Spend
+      a session tuning each entry for "rainbow bright but not blinding":
+      vivid enough to feel like rainbow dust, luminance flat enough that no
+      band flares. `DUST_BAND` (band width) and `DUST_SPEED` (drift rate,
+      keep it a divisor of `DUST_P` = BAND×7) are settled but fair game.
 
 ## Later / revisit
 

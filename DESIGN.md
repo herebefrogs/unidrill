@@ -86,23 +86,27 @@ Steering only:
 
 2D side view, pixel art. Heavy hit-stop and camera shake for impact.
 
-**Dust palette rotation.** Every uncollected dust cell on screen shares one
-colour, stepped globally over time through a fixed palette — `DUST_PALETTE`,
-14 hand-picked swatches (7 rainbow hues + 7 blends), one full loop per
-`DUST_CYCLE` ms. The classic palette-cycling trick: all "dust colour" pixels
-change together, driven by one clock, not per-cell — and it *steps* between
-discrete swatches rather than sweeping continuously, which suits the pixel
-art and lets the over-bright yellow/green/cyan band be tuned down per entry.
+**Dust rainbow.** Dust cells are coloured by sampling a **repeating diagonal
+rainbow** (↘, top-left → bottom-right) — `DUST_PALETTE`, the 7 rainbow hues
+(hand-picked hex, kept a touch muted so no band flares), `DUST_BAND` px per
+band. The rainbow is anchored to **underground position** so it reads as
+painted onto the terrain, plus a steady time phase (`DUST_SPEED` px/sec, a
+divisor of the tile size so a point cycles the full palette in a round
+number of seconds). The drift rate is deliberately **independent of descent
+speed** — an earlier screen-anchored version coupled the apparent motion to
+the drill's vertical velocity, which was distracting.
 
-Implemented as a **dust mask buffer** (`DUST_MASK`): dust-cell *shapes* only,
-opaque white on transparent, paged in lockstep with `MAP` by `scrollMap()`
-and stamped by `paintRow()` (skipping `DUG` cells so collected dust stops
-shimmering). Per frame, `renderDust()` lifts the camera slice of the mask
-into a scratch canvas, recolours it to the current swatch with a `source-in`
-fill, and composites it onto the backbuffer between the `MAP` blit and the
-hero — fixed cost regardless of how much dust is on screen, no per-cell work
-in the frame loop. Dust must stay *out* of `MAP` (rows freeze colour as the
-buffer pages).
+Implemented with a **dust mask buffer** (`DUST_MASK`): dust-cell *shapes*
+only, opaque white on transparent, paged in lockstep with `MAP` by
+`scrollMap()` and stamped by `paintRow()` (skipping `DUG` cells so collected
+dust stops shimmering). A seamless `DUST_P`-square tile of the rainbow is
+baked once (rotate 45°, lay down stripes) and used as a repeating pattern.
+Per frame, `renderDust()` lifts the camera slice of the mask into a scratch
+canvas, keeps the rainbow only where the mask is opaque (`source-in`,
+pattern offset by the camera's underground origin + time phase), and
+composites onto the backbuffer between the `MAP` blit and the hero — fixed
+cost regardless of how much dust is on screen, no per-cell work in the frame
+loop. Dust must stay *out* of `MAP` (rows freeze colour as the buffer pages).
 
 **Collection animation.** When a dust cell is dug, its pixels detach and
 fly in a straight line toward the dust counter in the screen corner, moving
@@ -116,7 +120,7 @@ space would drift off the counter.
 
 ```
   MAP layer         baked terrain + carved tunnel (paged buffer)
-  animation layer    live dust cells (DUST_MASK, recoloured per frame) + in-flight collection particles
+  animation layer    live dust cells (DUST_MASK shapes, rainbow-masked per frame) + in-flight collection particles
   HUD layer          dust counter, depth, momentum (TEXT buffer)
 ```
 
@@ -277,8 +281,8 @@ lattice and stops reading the coarse cell resolution as graininess.
 **Dense = solid fill**, like a clay blob — every cell inside the wobbly
 patch boundary is a dust cell.
 
-The dust field must **never be baked into `MAP`** (see Graphics — palette
-rotation). `paintRow()` stamps the dust *shape* into the separate `DUST_MASK`
+The dust field must **never be baked into `MAP`** (see Graphics — dust
+rainbow). `paintRow()` stamps the dust *shape* into the separate `DUST_MASK`
 buffer (same paging discipline as `MAP`); colour is applied per frame on the
 animation layer. SPARSE and DENSE are indistinguishable on the mask — the
 yield difference is carried entirely by the physical fill (dense = solid,
@@ -309,8 +313,8 @@ plus a momentum top-up when the cell was DENSE).
   the newly-exposed `CELL_SIZE` strip (sky above `SURFACE_Y`, else
   `DUG.has(cell)` ? tunnel : material colour). The 2× size is the lookahead
   margin that lets paging happen in occasional jumps, not every frame.
-  Dust is **not** in this buffer — its colour cycles globally, so a baked
-  swatch would freeze per row as the buffer pages.
+  Dust is **not** in this buffer — its colour comes from a drifting rainbow
+  sampled per frame, so a baked colour would freeze per row as it pages.
 - **DUST_MASK buffer**: same size and paging as `MAP`, holds only dust-cell
   shapes (opaque white on transparent). `scrollMap()` self-blits it (with
   `'copy'`, so transparent pixels overwrite cleanly) alongside `MAP`;
