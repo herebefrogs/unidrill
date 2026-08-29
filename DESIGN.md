@@ -74,7 +74,11 @@ momentum (which starts high and decays — see Core loop) — no throttle.
 Steering only:
 
 - Keyboard: Left / Right arrows, or A / D (plus Q for AZERTY), bank the
-  heading at a fixed turn rate.
+  heading at a fixed turn rate. The sign is tuned for the **descent** —
+  Left curves the drill screen-left while heading down; it reads inverted
+  on the climb back up, which is unavoidable with a bank model (the player
+  re-inverts naturally). Do not "fix" this by flipping the sign on
+  vertical velocity — the mid-transition jitter is worse.
 - Pointer (mobile): the drill heads in the direction the finger is
   currently dragging (drag direction sets the heading outright; drag
   magnitude is ignored). The direction-tracking logic in

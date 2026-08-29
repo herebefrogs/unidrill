@@ -5,7 +5,7 @@
 
  | File | What's in it |
  |---|---|
- | `src/js/game.js` | **Everything gameplay**: RAF loop, the 3 screens (TITLE/GAME/END), `hero` state + `moveHero()` + momentum/drag + win-lose, camera follow, the `MAP` buffer paging (`scrollMap`/`paintRow`), digging (`digShaft`/`dig`/`DUG`), all rendering, input dispatch (`processInputs`). |
+ | `src/js/game.js` | **Everything gameplay**: RAF loop, the 3 screens (TITLE/GAME/END), `hero` state + `moveHero()` + momentum/drag + win-lose, camera follow, the `MAP` buffer paging (`scrollMap`/`paintRow`), digging (`digShaft`/`dig`/`DUG`), the dust rainbow layer (`DUST_MASK`/`DUST_GRADIENT`/`DUST_PATTERN`/`renderDust`), all rendering, input dispatch (`processInputs`). |
  | `src/js/terrain.js` | Pure procedural terrain: `sampleMaterial(x,y)` (macro sections + rock-blob pass) and `sampleDust(x,y)` → `DUST_NONE`/`SPARSE`/`DENSE` (own microgrid, wobbly patches, quarter-grid dither for sparse). `CELL_SIZE`, materials `SAND`/`CLAY`, `MATERIAL_COLOR`, `MATERIAL_DRAG`. All keyed off the stateless `hash2D` — nothing stored, recomputed on demand. |
  | `src/js/inputs/keyboard.js`, `inputs/pointer.js` | Raw input capture only (see Game engine below). `pointer.js`'s drag-direction logic is deliberately unusual — ask before touching. |
  | `src/js/text.js` | Bitmap text (`renderText`, `CHARSET_SIZE`, `ALIGN_*`). |
@@ -23,9 +23,18 @@
    `depth` stays invariant.
  - **The `MAP` buffer is paged, never rebuilt.** `scrollMap()` self-blits by
    the scroll delta and `paintRow()` repaints only the newly exposed strip.
-   Dust is currently a TEMP debug tint baked into `paintRow` — the real
-   render is a per-frame animation layer (palette rotation + collect
-   particles), still TODO. Don't build on the baked version.
+ - **`DUST_MASK` is a second paged buffer, in lockstep with `MAP`.** Holds
+   dust-cell *shapes* only (opaque white on transparent); `scrollMap()`
+   self-blits it too (with `'copy'` — it's transparent-backed, so
+   source-over would ghost), `paintRow()` stamps its strip, `dig()` clears
+   collected cells. `renderDust()` colours it per frame by `source-in`-
+   masking a repeating diagonal rainbow tile (`DUST_PATTERN`) through it,
+   offset by the camera's *underground* origin (`cy - SURFACE_Y + mapOffset`)
+   so the rainbow sticks to the terrain, + a constant time phase. Gotchas:
+   the camera rect must be `Math.floor`'d (dust takes an extra
+   lift→colour→place round-trip `MAP` doesn't, so a fractional offset makes
+   it crawl ±1px vs terrain); and it must be *one* pattern fill, not tiled
+   `drawImage`s — successive `source-in` draws wipe each other.
  - **Two independent RNGs, never crossed.** `terrain.js` `hash2D` is a
    *stateless* pure hash — everything underground (terrain, dust, later
    ore) keys off it, safe to share freely since output depends only on the
