@@ -60,8 +60,8 @@ Dense dust tops momentum back up (`MOMENTUM.denseBoost` px/sec per dense
 cell dug — `digShaft()` clears several cells per tick, so entering a patch
 gives a jolt), so a deeper dive is winnable when the drilled route threads
 through dense patches. A dive that misses them decays on drag + entropy
-alone, and the only safe line is a shallow pull-up (a full 180° bank takes
-~1s at the current turn rate).
+alone, and the only safe line is a shallow pull-up (a full 180° turn takes
+~0.5s at the current turn rate).
 
 ## Tracked state
 
@@ -71,20 +71,23 @@ Current momentum, dust collected, depth achieved, time elapsed.
 
 The drill thrusts forward along its heading at a speed equal to its current
 momentum (which starts high and decays — see Core loop) — no throttle.
-Steering only:
+Steering only. Both input paths work the same way: they pick an **absolute
+target heading**, and the drill's heading eases toward it at a fixed turn
+rate (`TURN_SPEED`, ~0.5s for a full 180°). Absolute, not relative — Up is
+up whether descending or climbing, no inversion between the legs.
 
-- Keyboard: Left / Right arrows, or A / D (plus Q for AZERTY), bank the
-  heading at a fixed turn rate. The sign is tuned for the **descent** —
-  Left curves the drill screen-left while heading down; it reads inverted
-  on the climb back up, which is unavoidable with a bank model (the player
-  re-inverts naturally). Do not "fix" this by flipping the sign on
-  vertical velocity — the mid-transition jitter is worse.
-- Pointer (mobile): the drill heads in the direction the finger is
-  currently dragging (drag direction sets the heading outright; drag
-  magnitude is ignored). The direction-tracking logic in
-  `src/js/inputs/pointer.js` works around a touch quirk and is deliberately
-  unusual — get the full context from Jerome before changing it. Direction
-  changes currently feel abrupt; a smoothing pass is planned.
+- Keyboard: Arrow keys or WASD (plus Q for AZERTY-left), one per cardinal
+  direction. Opposing keys cancel; adjacent keys combine to a diagonal.
+  No key held → the drill coasts on its current heading.
+- Pointer (mobile): the target heading is whichever direction the finger is
+  currently dragging (drag direction only; magnitude ignored). The
+  direction-tracking logic in `src/js/inputs/pointer.js` works around a
+  touch quirk and is deliberately unusual — get the full context from
+  Jerome before changing it.
+
+`TURN_SPEED` is still being tuned against playtests (see TODO.md); the
+model itself — absolute heading vs. the old bank — is also provisional
+until playtesters weigh in.
 
 ## Graphics
 

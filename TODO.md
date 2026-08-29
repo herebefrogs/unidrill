@@ -111,6 +111,22 @@ for the reasoning behind each of these; this is just the sequencing.
 
 ## Playtest / gameplay balancing
 
+- [ ] Steering model — absolute direction vs. bank. Playtester said the
+      keyboard bank-the-heading control "didn't feel natural"; they want
+      Up/Down/Left/Right (combining to diagonals) that matches the mobile
+      "head where you drag" feel. First cut (instant snap to one of 8
+      directions) was too snappy per the playtester — "I don't want it to
+      feel super laggy, but I don't want only horizontal/diagonal/vertical
+      either." Current state: keyboard + pointer both pick an ABSOLUTE
+      target heading, `hero.angle` eases toward it at `TURN_SPEED = 2*PI`
+      (~0.5s for a 180°, ~0.25s for 90°) — game.js `processInputs()`.
+      `TURN_SPEED` is the tuning knob. Still needs a feel check, and:
+      (1) tune the rate to taste; (2) an eased turn keeps a pull-up
+      commitment cost, but it's shorter now than the old ~1s bank — watch
+      whether the bingo-fuel tension DESIGN.md's Win/lose leans on ("only
+      safe line is a shallow pull-up") still holds. If this model sticks,
+      sync DESIGN.md Controls + fold in the pointer-smoothing TODO below.
+
 - [ ] Rainbow dust palette (`DUST_PALETTE` in game.js). The 7 swatches are
       currently held dark/desaturated to kill the blinding yellow-green-cyan
       flare — went a touch far the other way, they read a little muted. Spend

@@ -46,9 +46,14 @@
    negative coords (`| 0` truncates toward zero → a double-wide cell and a
    mirror seam at the origin). Harmless while everything is `x >= 0`; will
    bite when the map extends left of `x = 0` (horizontal panning).
- - **Build:** the user keeps `npm start` running in another terminal (see
-   memory). Don't run `npm run build` while it's live. `npm run build:js`
-   alone is a safe "does it bundle?" check.
+ - **Build:** never run a build yourself — not `npm run build`, not
+   `npm run build:js`, not `npm start`. The user keeps `npm start` running
+   (a Claude Code task or a separate terminal); it watches `src/js` and
+   prints esbuild errors on save. To check whether an edit compiled, read
+   that task's output — ask the user to surface it if you can't reach it.
+   `npm run build:js` overwrites `dist/game.js` with a terser build and
+   fights the watch; `npm run build` also runs `clean` (`rm -rf dist`),
+   which silently kills the running watch. See memory for the full picture.
 
  Leave this section better than you found it — if a fresh session would have
  been faster knowing something, add it here before `/clear`. The `/handoff`

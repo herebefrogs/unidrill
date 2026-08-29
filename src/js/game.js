@@ -7,7 +7,7 @@ import { loadSongs, playSound, playSong } from './sound';
 import { initSpeech } from './speech';
 import { save, load } from './storage';
 import { ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, CHARSET_SIZE, initCharset, renderText, initTextBuffer, clearTextBuffer, renderAnimatedText } from './text';
-import { getRandSeed, setRandSeed, loadImg } from './utils';
+import { clamp, getRandSeed, setRandSeed, loadImg } from './utils';
 import { CELL_SIZE, sampleMaterial, materialColor, MATERIAL_DRAG, sampleDust, DUST_NONE, DUST_DENSE } from './terrain';
 import TILESET from '../img/tileset.webp';
 
@@ -28,7 +28,12 @@ const NORMALIZE_DIAGONAL = Math.cos(Math.PI / 4);
 
 const HERO_W = 24;                             // temporary blue square, real sprite later
 const HERO_H = 24;
-const TURN_SPEED = Math.PI;                    // radians/sec the drill can bank left/right
+// how fast the drill rotates toward its 8-direction steering target
+// (radians/sec). Finite so the heading eases into the new direction rather
+// than snapping to one of 8 discrete angles - 2*PI = a full 180 in ~0.5s,
+// 90 in ~0.25s: progressive but not laggy. Playtest knob; Infinity would
+// give a classic instant snap.
+const TURN_SPEED = 2 * Math.PI;
 
 // momentum loop tuning (px/sec, px/sec^2). The drill launches with a fixed
 // downward impulse (MOMENTUM.initial) that only ever decays: a baseline
@@ -400,32 +405,34 @@ function processInputs() {
         startGame();
       }
       break;
-    case GAME_SCREEN:
-      // drill always thrusts forward along hero.angle (see moveHero) -
-      // there's no throttle. Left/right bank the angle by a rate; a pointer
-      // drag replaces the angle outright with the drag direction.
-      // Sign note: banking is optimised for the DOWNWARD leg - pressing Left
-      // curves the drill toward screen-left while descending (angle += , i.e.
-      // counter-clockwise-from-"down" in y-down screen space). It reads
-      // inverted on the climb back up; that's unavoidable with a bank model
-      // and the player re-inverts their inputs naturally on the way up.
+    case GAME_SCREEN: {
+      // steering only, no throttle: the drill always thrusts forward along
+      // hero.angle (see moveHero). Both input paths pick an ABSOLUTE target
+      // heading - Up is up on the descent AND the climb, no bank-model
+      // inversion - then hero.angle rotates toward it at TURN_SPEED.
+      let target;
       if (isPointerDown()) {
         const [vX, vY] = pointerDirection();
-        if (vX || vY) hero.angle = Math.atan2(vY, vX);
+        if (vX || vY) target = Math.atan2(vY, vX);
       } else {
-        hero.moveLeft = isKeyDown(
-          'ArrowLeft',
-          'KeyA',   // English Keyboard layout
-          'KeyQ'    // French keyboard layout
-        );
-        hero.moveRight = isKeyDown(
-          'ArrowRight',
-          'KeyD'
-        );
-        if (hero.moveLeft) hero.angle += TURN_SPEED * elapsedTime;
-        if (hero.moveRight) hero.angle -= TURN_SPEED * elapsedTime;
+        // e.code is physical: AZERTY's ZQSD sits on physical KeyW/KeyQ/KeyS/
+        // KeyD, so KeyW/KeyS already serve both layouts; only left needs KeyQ.
+        const dx = (isKeyDown('ArrowRight', 'KeyD') ? 1 : 0)
+                 - (isKeyDown('ArrowLeft', 'KeyA', 'KeyQ') ? 1 : 0);
+        const dy = (isKeyDown('ArrowDown', 'KeyS') ? 1 : 0)
+                 - (isKeyDown('ArrowUp', 'KeyW') ? 1 : 0);
+        if (dx || dy) target = Math.atan2(dy, dx);
+      }
+      // nothing held -> coast on the current heading (momentum game, no neutral)
+      if (target !== undefined) {
+        // shortest signed turn to the target, wrapped to [-PI, PI] so a 180
+        // press doesn't pick the long way round
+        const d = Math.atan2(Math.sin(target - hero.angle), Math.cos(target - hero.angle));
+        const step = TURN_SPEED * elapsedTime;   // Infinity => clamp is a no-op => snap
+        hero.angle += clamp(d, -step, step);
       }
       break;
+    }
     case END_SCREEN:
       if (isKeyUp('KeyT')) {
         // TODO can I share an image of the game?
