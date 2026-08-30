@@ -5,10 +5,10 @@
 
  | File | What's in it |
  |---|---|
- | `src/js/game.js` | **Everything gameplay**: RAF loop, the 3 screens (TITLE/GAME/END), `hero` state + `moveHero()` + momentum/drag + win-lose, camera follow, the `MAP` buffer paging (`scrollMap`/`paintRow`), digging (`digShaft`/`dig`/`DUG`), the dust rainbow layer (`DUST_MASK`/`DUST_GRADIENT`/`DUST_PATTERN`/`renderDust`), dust collection particles (`spawnDustParticle`/`updateParticles`/`renderParticles`), all rendering, input dispatch (`processInputs`). |
+ | `src/js/game.js` | **Everything gameplay**: RAF loop, the 3 screens (TITLE/GAME/END), `hero` state + `moveHero()` + momentum/drag + win-lose, camera follow, the `MAP` buffer paging (`scrollMap`/`paintRow`), digging (`digShaft`/`dig`/`DUG`), the dust rainbow layer (`DUST_MASK`/`DUST_GRADIENT`/`DUST_PATTERN`/`renderDust`), dust collection particles (`spawnDustParticle`/`updateParticles`/`renderParticles`), the HUD (`HUD_*`/`PX_PER_M`/`DUST_COUNTER_*`/`DUST_POP_DURATION`, drawn inline in `render()`), all rendering, input dispatch (`processInputs`). |
  | `src/js/terrain.js` | Pure procedural terrain: `sampleMaterial(x,y)` (macro sections + rock-blob pass) and `sampleDust(x,y)` → `DUST_NONE`/`SPARSE`/`DENSE` (own microgrid, wobbly patches, quarter-grid dither for sparse). `CELL_SIZE`, materials `SAND`/`CLAY`, `MATERIAL_COLOR`, `MATERIAL_DRAG`. All keyed off the stateless `hash2D` — nothing stored, recomputed on demand. |
  | `src/js/inputs/keyboard.js`, `inputs/pointer.js` | Raw input capture only (see Game engine below). `pointer.js`'s drag-direction logic is deliberately unusual — ask before touching. |
- | `src/js/text.js` | Bitmap text (`renderText`, `CHARSET_SIZE`, `ALIGN_*`). |
+ | `src/js/text.js` | Bitmap text (`renderText`, `CHARSET_SIZE`, `ALIGN_*`). `renderText`'s 5th arg is an integer `scale` (HUD draws at 3). |
  | `src/js/utils.js` | Seeded PRNG, `lerp`, `clamp`, `loadImg`. |
  | `src/js/{share,storage,sound,speech,mobile,monetization}.js` | Boilerplate helpers, mostly unused so far — wire in as TODO items reach them. |
 
@@ -21,6 +21,13 @@
    compare `hero.y` to `SURFACE_Y` — `scrollMap()` mutates `hero.y`,
    `cameraY` and `mapOffset` together, so world-space `hero.y` drifts while
    `depth` stays invariant.
+ - **The HUD reads metric; the sim is all pixels.** `depth` and
+   `hero.momentum` are pixels. `PX_PER_M` (32) exists *only* to convert them
+   for the on-screen readout (`depth: 12.4m`, `speed: 19m/s`) — never feed it
+   back into gameplay math. HUD lines are left-aligned at `HUD_X` on purpose:
+   right/centre-aligned, the labels jump around as the numbers change width.
+   The `dust:` value is drawn separately from its label so only the number
+   does the per-tally pop (`DUST_POP_DURATION`).
  - **The `MAP` buffer is paged, never rebuilt.** `scrollMap()` self-blits by
    the scroll delta and `paintRow()` repaints only the newly exposed strip.
  - **`DUST_MASK` is a second paged buffer, in lockstep with `MAP`.** Holds

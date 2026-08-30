@@ -53,8 +53,8 @@ momentum:
   frame-1 pull-up doesn't count). Dust carried scales rainbow size and
   score.
 - **Lose:** momentum hits exactly zero while still underground ("bingo
-  fuel") — no rainbow. Running out at or above the surface without a
-  qualifying dive is also a loss.
+  fuel", shown to the player as "tapped out!") — no rainbow. Running out at
+  or above the surface without a qualifying dive is also a loss.
 
 Dense dust tops momentum back up (`MOMENTUM.denseBoost` px/sec per dense
 cell dug — `digShaft()` clears several cells per tick, so entering a patch
@@ -65,7 +65,14 @@ alone, and the only safe line is a shallow pull-up (a full 180° turn takes
 
 ## Tracked state
 
-Current momentum, dust collected, depth achieved, time elapsed.
+Speed, depth, dust collected. The HUD shows them top-left, left-aligned, at
+3x the bitmap font. Speed and depth are converted from the pixel-space sim
+values to metric for display only (`PX_PER_M` = 32 px/m → `speed` in m/s,
+`depth` in m); the sim itself never leaves pixels. The metric scale only
+reads as meaningful while the surface is on screen — once deep there's no
+reference frame — so it's tuned for that: the drill is ~0.9 m, a dust cell
+~0.25 m, a straight sand dive bottoms out around 48 m, a there-and-back win
+around 24 m.
 
 ## Controls
 
@@ -130,14 +137,18 @@ the particle lands, not when the cell is dug — juicier, but it means a run
 that ends (bingo fuel or resurfacing) while particles are still mid-flight
 must tally their dust instantly rather than let the score depend on how
 much of the animation had time to finish; those particles keep flying
-visually after the tally, they just don't double-count on arrival.
+visually after the tally, they just don't double-count on arrival. On each
+tick the counter *value* (the number only, not the `dust:` label) briefly
+swells to 2x and back (`DUST_POP_DURATION`), scaling about its own centre;
+re-triggers aren't debounced, so a dense-patch burst reads as a rapid
+pulse.
 
 **Layer order** (far → near):
 
 ```
   MAP layer         baked terrain + carved tunnel (paged buffer)
   animation layer    live dust cells (DUST_MASK shapes, rainbow-masked per frame) + in-flight collection particles
-  HUD layer          dust counter, depth, momentum (TEXT buffer)
+  HUD layer          speed, depth, dust counter (TEXT buffer)
 ```
 
 Stretch goal: anaglyph red/cyan mode — requires background/entity depth-plane

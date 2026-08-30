@@ -60,7 +60,8 @@ for the reasoning behind each of these; this is just the sequencing.
       time. Edge case handled: `endGame()` tallies any still-in-flight
       particles' dust instantly (they keep animating on END_SCREEN, just
       already counted), so a bingo-fuel/resurface stop never scores dust as
-      lost to the animation.
+      lost to the animation. Counter value also pops 2x-and-back on each
+      tick (`DUST_POP_DURATION`), undebounced — see the game-feel memory.
 - [ ] Bingo-fuel warning. HUD alert when the player likely can't make it
       back up. Approximate — we don't know the return path or the material
       along it — so estimate against a straight climb decaying at the sand
@@ -131,6 +132,12 @@ for the reasoning behind each of these; this is just the sequencing.
       (snappier per playtest); still needs another feel check at the new
       rate.
 
+- [ ] HUD feel-check. Now 3x font, metric units (speed ~19 m/s at launch,
+      depth in m). Confirm the numbers read right in play and that the larger
+      font isn't crowding the play area on the smallest target viewport
+      (portrait mobile especially). `PX_PER_M`, `HUD_SCALE`, `DUST_POP_DURATION`
+      are the knobs.
+
 - [ ] Rainbow dust palette (`DUST_PALETTE` in game.js). The 7 swatches are
       currently held dark/desaturated to kill the blinding yellow-green-cyan
       flare — went a touch far the other way, they read a little muted. Spend
@@ -141,9 +148,14 @@ for the reasoning behind each of these; this is just the sequencing.
 
 ## Later / revisit
 
-- [ ] Depth is currently displayed in raw pixels. Should be in meters, but we
-      don't know the px-per-meter ratio until map/viewport sizing is
-      finalized. Revisit once that's locked in.
+- [x] Depth (and speed) shown in metric. `PX_PER_M = 32` px/m, display-only —
+      the sim stays in pixels, the HUD divides for the readout (`depth` in m
+      to 1dp, `speed` in m/s). At this scale the drill is ~0.9 m, a dust cell
+      ~0.25 m, a straight sand dive bottoms out ~48 m, a there-and-back win
+      ~24 m. Scale only matters while the surface is visible (no reference
+      frame once deep), so it's tuned for that. HUD also got a pass: 3x font,
+      top-left + left-aligned so labels don't shift, "momentum" relabelled
+      "speed", loss text "tapped out!", dust-counter value pops on each tally.
 - [ ] Brainstorm whimsical game names that avoid "unicorn" and "rainbow" —
       most other entries will lean on those words, want something that
       stands out. "UniDrill Corp" is just the working title for now.
@@ -156,6 +168,11 @@ for the reasoning behind each of these; this is just the sequencing.
 - [ ] Add gamepad support. There's prior art in Jerome's old veggie-ninja repo:
       https://github.com/herebefrogs/veggie-ninja/blob/master/src/js/gamepad.js
       (and possibly an older commit in gamejam-boilerplate's own history).
+- [ ] Drop the bitmap font, switch to Impact. Sharper and more readable than
+      the pixel font, and it's a system font so it costs no bytes. Would
+      retire src/js/text.js (`renderText`/charset sprite/`CHARSET_SIZE`/
+      `ALIGN_*`) in favour of plain canvas `fillText` — touches every HUD
+      + screen-text call site and the `scale`/`HUD_*` layout math.
 
 ## Ideas — not yet designed
 
