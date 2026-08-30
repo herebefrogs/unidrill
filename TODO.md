@@ -107,14 +107,11 @@ for the reasoning behind each of these; this is just the sequencing.
 - [ ] In portrait screen ratio, the canvas should use the whole screen to
       show as much of the underground as possible. Revisit the locked-ratio
       logic then — it may be wrong regardless of screen orientation.
-- [ ] Pausing (P) and resuming makes every dust cell's colour jump. `loop()`
-      stops calling `requestAnimationFrame` entirely while paused, but
-      `renderDust()`'s rainbow phase is driven off raw `performance.now()`
-      (`currentTime`) — so the wall-clock gap while paused shows up as one
-      big discontinuous jump in the phase on resume. Needs the rainbow
-      animation clock to track elapsed *game* time, not wall time (e.g.
-      accumulate phase from `elapsedTime` each frame instead of reading
-      `currentTime` directly, so a pause just freezes it).
+- [x] Pausing (P) and resuming makes every dust cell's colour jump. Fixed:
+      the rainbow phase (`dustColorAt()`, `renderDust()`) now keys off
+      `gameTime`, a running total of `elapsedTime` only accumulated inside
+      `loop()`'s `running` guard, instead of raw `performance.now()`
+      (`currentTime`) — a pause just freezes it.
 
 ## Playtest / gameplay balancing
 

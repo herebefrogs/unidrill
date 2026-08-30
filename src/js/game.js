@@ -201,6 +201,13 @@ let currentTime;
 let elapsedTime;
 let lastTime;
 let requestId;
+// elapsed GAME time (seconds), unlike currentTime/performance.now() which
+// keeps ticking wall-clock time through a pause - only ever advanced by
+// elapsedTime inside loop()'s `running` guard, so pausing just freezes it.
+// Anything animating off the passage of time during gameplay (the dust
+// rainbow phase) must key off this, not currentTime, or the wall-clock gap
+// while paused shows up as a jump on resume.
+let gameTime = 0;
 let running = true;
 
 // GAMEPLAY HANDLERS
@@ -601,7 +608,7 @@ function dig(x, undergroundY) {
 // CENTRE (x, y already CELL_SIZE-aligned) so a cell straddling a band
 // boundary doesn't pick its neighbour's colour.
 function dustColorAt(x, undergroundY) {
-  const phase = Math.floor(currentTime * DUST_SPEED / 1000);
+  const phase = Math.floor(gameTime * DUST_SPEED);
   const i = Math.floor((x + CELL_SIZE / 2 + undergroundY + CELL_SIZE / 2 + phase) / DUST_BAND);
   return DUST_PALETTE[((i % DUST_PALETTE.length) + DUST_PALETTE.length) % DUST_PALETTE.length];
 }
@@ -789,7 +796,7 @@ function renderDust() {
   // rate. Underground y of scratch row 0 is (cy - SURFACE_Y + mapOffset), x
   // is cx. Phase is floored to whole px - integer offsets keep the pattern
   // pixel-aligned (smoothing is off), so it scrolls in crisp 1px steps.
-  const phase = Math.floor(currentTime * DUST_SPEED / 1000);
+  const phase = Math.floor(gameTime * DUST_SPEED);
   const tx = -(((cx % DUST_P) + DUST_P) % DUST_P);
   const ty = -((((cy - SURFACE_Y + mapOffset + phase) % DUST_P) + DUST_P) % DUST_P);
   DUST_LAYER_CTX.globalCompositeOperation = 'source-in';
@@ -880,6 +887,7 @@ function loop() {
     requestId = requestAnimationFrame(loop);
     currentTime = performance.now();
     elapsedTime = (currentTime - lastTime) / 1000;
+    gameTime += elapsedTime;
     update();
     render();
     lastTime = currentTime;
