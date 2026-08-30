@@ -34,9 +34,15 @@ that isn't in one of those is lost on `/clear`. This skill moves it there.
    Update the matching existing file rather than duplicating; add the
    one-line pointer to `MEMORY.md`. Skip anything the repo already records.
 
-4. **`TODO.md`.** Tick finished items. Add bugs/scope discovered. If an item
-   is half-done, leave a sub-bullet with the concrete next step and which
-   files are mid-edit — not "continue where I left off".
+4. **`TODO.md`.** Tick finished items; if a finished item wasn't next in
+   line (worked out of order), move it to where it actually landed in the
+   sequence so the list keeps reading top-to-bottom as build order. Add
+   bugs/scope discovered — except a bug fixed within the same session it
+   was logged: delete it rather than ticking it, a resolved bug has no
+   ongoing value and the commit is the record (checked-off items elsewhere
+   in the list stay, since they document build order, not just status). If
+   an item is half-done, leave a sub-bullet with the concrete next step and
+   which files are mid-edit — not "continue where I left off".
 
 5. **`DESIGN.md`.** Per `CLAUDE.md`: if what got built contradicts it, edit
    the doc to describe the current design. No changelog notes.
