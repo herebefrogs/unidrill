@@ -108,6 +108,14 @@ for the reasoning behind each of these; this is just the sequencing.
 - [ ] In portrait screen ratio, the canvas should use the whole screen to
       show as much of the underground as possible. Revisit the locked-ratio
       logic then — it may be wrong regardless of screen orientation.
+- [ ] Pausing (P) and resuming makes every dust cell's colour jump. `loop()`
+      stops calling `requestAnimationFrame` entirely while paused, but
+      `renderDust()`'s rainbow phase is driven off raw `performance.now()`
+      (`currentTime`) — so the wall-clock gap while paused shows up as one
+      big discontinuous jump in the phase on resume. Needs the rainbow
+      animation clock to track elapsed *game* time, not wall time (e.g.
+      accumulate phase from `elapsedTime` each frame instead of reading
+      `currentTime` directly, so a pause just freezes it).
 
 ## Playtest / gameplay balancing
 
@@ -126,6 +134,9 @@ for the reasoning behind each of these; this is just the sequencing.
       whether the bingo-fuel tension DESIGN.md's Win/lose leans on ("only
       safe line is a shallow pull-up") still holds. If this model sticks,
       sync DESIGN.md Controls + fold in the pointer-smoothing TODO below.
+      Feel-check update (2026-08-29): curves between directions read nicer
+      now, but it still feels like "constantly fighting the arrows" and
+      patches get missed — `TURN_SPEED` dampening needs a tuning pass.
 
 - [ ] Rainbow dust palette (`DUST_PALETTE` in game.js). The 7 swatches are
       currently held dark/desaturated to kill the blinding yellow-green-cyan
@@ -170,6 +181,17 @@ Half-formed; each needs a design pass before it becomes a build item.
       patch?) before it's worth prototyping. Risk: the game's pleasure is
       carving your own path — anything that demands twitch dodging could
       fight that.
+- [ ] Drop resurfacing as a win condition — dig-only-down. If playtesting
+      shows bingo-fuel warnings aren't enough to make players turn around
+      on their own, cut the "climb back to the surface" win entirely: the
+      run just ends when momentum hits 0, wherever the player is. On
+      end, camera fast-scrolls up the tunnel back to the surface (dust
+      collected along that tunnel "sprouting" the rainbow as it passes) as
+      the outcome reveal, instead of the player having to actually pilot
+      the climb. Turns the game into pure descent — no return-trip
+      management. Needs a design pass: what replaces the win condition,
+      does depth alone become the score, does bingo-fuel still matter as a
+      mechanic if there's nothing to conserve fuel for.
 
 ## Won't do
 

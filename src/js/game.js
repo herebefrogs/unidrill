@@ -7,7 +7,7 @@ import { loadSongs, playSound, playSong } from './sound';
 import { initSpeech } from './speech';
 import { save, load } from './storage';
 import { ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, CHARSET_SIZE, initCharset, renderText, initTextBuffer, clearTextBuffer, renderAnimatedText } from './text';
-import { clamp, getRandSeed, setRandSeed, loadImg } from './utils';
+import { clamp, getRandSeed, setRandSeed, loadImg, lerp } from './utils';
 import { CELL_SIZE, sampleMaterial, materialColor, MATERIAL_DRAG, sampleDust, DUST_NONE, DUST_DENSE } from './terrain';
 import TILESET from '../img/tileset.webp';
 
@@ -26,8 +26,8 @@ let screen = GAME_SCREEN; // TODO restore TITLE_SCREEN once GAME_SCREEN is furth
 // so they don't seem to move faster than when traveling vertically or horizontally
 const NORMALIZE_DIAGONAL = Math.cos(Math.PI / 4);
 
-const HERO_W = 24;                             // temporary blue square, real sprite later
-const HERO_H = 24;
+const HERO_W = 28;                             // temporary blue square, real sprite later
+const HERO_H = 28;
 // how fast the drill rotates toward its 8-direction steering target
 // (radians/sec). Finite so the heading eases into the new direction rather
 // than snapping to one of 8 discrete angles - 2*PI = a full 180 in ~0.5s,
@@ -56,7 +56,8 @@ let heroWentDeep;                              // armed once depth passes MOMENT
 let outcome;                                   // true = win (rainbow), false = lose (bingo fuel); read on END_SCREEN
 let endReady;                                  // END_SCREEN: true once all inputs held at game-over have been released
 let depth;                                     // px drilled below the surface (world-space y, until infinite scroll lands)
-let dust;                                       // rainbow-dust cells collected this run (= DUG ∩ sampleDust, tallied at dig time). The "visuals" item moves the HUD tick to particle-arrival; the count itself stays here.
+let dust;                                       // rainbow-dust cells collected this run (= DUG ∩ sampleDust), tallied at dig time.
+let particles;                                  // in-flight collection particles (screen-space, purely cosmetic - the dust tally above never waits on them)
 
 let speak;
 
@@ -90,6 +91,7 @@ hero = {
 heroWentDeep = false;
 depth = 0;
 dust = 0;
+particles = [];
 // camera-window & edge-snapping settings
 const CAMERA_WINDOW_X = 400;
 const CAMERA_WINDOW_Y = 200;
@@ -160,6 +162,30 @@ DUST_GRADIENT.width = DUST_GRADIENT.height = DUST_P;
   }
 }
 const DUST_PATTERN = DUST_LAYER_CTX.createPattern(DUST_GRADIENT, 'repeat');
+
+// collection animation: a dug dust cell detaches in two stages, purely
+// cosmetic - the dust tally itself is already final at dig time (see
+// `dust`). Stage 0 ("takeoff"): the cell doubles in size in place, at its
+// dig location - tracked in BUFFER/world space like the hero, so it rides
+// the camera scroll exactly like the terrain it detached from (including
+// scrollMap's paging jumps, see the particle loop there). Stage 1
+// ("flight"): eases (accelerating from rest) to the HUD dust counter -
+// switches to SCREEN space (camera-independent) at the stage transition,
+// because the camera re-centers on the hero every frame, so a particle
+// still tracked in buffer space would drift away from the (screen-fixed)
+// counter instead of flying to it. Both stages draw onto BUFFER_CTX -
+// stage 0 directly in buffer coordinates, stage 1 by adding back the
+// *current* camera position each frame (see renderParticles) - keeping
+// particles on the animation layer (over MAP/dust, under HUD) per
+// DESIGN.md.
+const PARTICLE_SIZE = CELL_SIZE;
+const PARTICLE_PUSH_MARGIN = CELL_SIZE * 3;   // how far stage 0 clears the tunnel edge by - bigger spreads a dense patch's many-particles-at-once apart
+const PARTICLE_GROW_DURATION = 0.25;    // seconds, stage 0: growing in place
+const PARTICLE_FLY_DURATION = 0.6;      // seconds, stage 1: flight to the counter
+const PARTICLE_DURATION_JITTER = 0.2;   // +/- range, staggers arrivals on a multi-cell dig
+const DUST_COUNTER_X = CAMERA_WIDTH - CHARSET_SIZE;   // where the HUD 'dust N' label is drawn (also the particles' flight target)
+const DUST_COUNTER_Y = 3 * CHARSET_SIZE + 8;
+
 const TEXT = initTextBuffer(c, CAMERA_WIDTH, CAMERA_HEIGHT);  // text buffer
 
 
@@ -202,6 +228,7 @@ function startGame() {
   outcome = undefined;
   depth = 0;
   dust = 0;
+  particles = [];
   renderMap();
   screen = GAME_SCREEN;
 };
@@ -465,6 +492,9 @@ function update() {
       followCamera();
     }
   }
+  // outside the GAME_SCREEN guard: particles in flight when the run ends
+  // still finish flying on END_SCREEN instead of freezing mid-air.
+  updateParticles();
 };
 
 // deceleration (px/sec^2) the drill currently suffers, sampled at its
@@ -546,7 +576,73 @@ function dig(x, undergroundY) {
     const d = sampleDust(x, undergroundY);
     if (d !== DUST_NONE) {
       dust++;
+      spawnDustParticle(x, undergroundY);
       if (d === DUST_DENSE) hero.momentum = Math.min(MOMENTUM.max, hero.momentum + MOMENTUM.denseBoost);
+    }
+  }
+}
+
+// colour a dust cell would render as right now, without reading pixels back
+// from DUST_LAYER: renderDust() masks DUST_PATTERN through DUST_MASK, and
+// DUST_PATTERN tiles DUST_GRADIENT (rotate-45+stripe bands, see its build
+// above) offset by the camera's underground origin + a time phase. Working
+// through both transforms algebraically, the on-screen band index at a given
+// (worldX, undergroundY) reduces to this one expression - the 45deg rotation
+// and the tile's recentring translate both cancel out. Sampled at the cell
+// CENTRE (x, y already CELL_SIZE-aligned) so a cell straddling a band
+// boundary doesn't pick its neighbour's colour.
+function dustColorAt(x, undergroundY) {
+  const phase = Math.floor(currentTime * DUST_SPEED / 1000);
+  const i = Math.floor((x + CELL_SIZE / 2 + undergroundY + CELL_SIZE / 2 + phase) / DUST_BAND);
+  return DUST_PALETTE[((i % DUST_PALETTE.length) + DUST_PALETTE.length) % DUST_PALETTE.length];
+}
+
+// spawn one collection particle for a just-dug dust cell, starting stage 0
+// ("takeoff") at the cell's centre in BUFFER/world space.
+function spawnDustParticle(x, undergroundY) {
+  const cx = x + CELL_SIZE / 2;
+  const cy = undergroundY + SURFACE_Y - mapOffset + CELL_SIZE / 2;
+  // push radially out from the hero (the tunnel's centre) while growing, so
+  // the particle clears the freshly-dug (black) tunnel instead of doubling
+  // in size on top of it. dist is always <= hero.w/2 - digShaft only calls
+  // dig() for cells within that radius - so the push is never negative.
+  const hx = hero.x + hero.w / 2, hy = hero.y + hero.h / 2;
+  const dist = Math.hypot(cx - hx, cy - hy) || 1;
+  const push = (hero.w / 2 - dist) + PARTICLE_PUSH_MARGIN;
+  particles.push({
+    x: cx,
+    y: cy,
+    pushX: (cx - hx) / dist * push,
+    pushY: (cy - hy) / dist * push,
+    stage: 0,
+    t: 0,
+    growDuration: PARTICLE_GROW_DURATION + (Math.random() - 0.5) * PARTICLE_DURATION_JITTER,
+    flyDuration: PARTICLE_FLY_DURATION + (Math.random() - 0.5) * PARTICLE_DURATION_JITTER,
+    color: dustColorAt(x, undergroundY),
+  });
+}
+
+// advance particles and drop any that have landed. Runs every frame
+// regardless of screen (see call site in update()) so a dig right before
+// game-over still finishes its animation on END_SCREEN instead of freezing
+// mid-air.
+function updateParticles() {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.t += elapsedTime;
+    if (p.stage === 0) {
+      if (p.t >= p.growDuration) {
+        // stage transition: snapshot the fully-grown, fully-pushed screen
+        // position as the stage-1 flight's start point (see the PARTICLE_*
+        // comment) and carry over the leftover time so the switch doesn't
+        // stutter.
+        p.t -= p.growDuration;
+        p.stage = 1;
+        p.x0 = p.x + p.pushX - cameraX;
+        p.y0 = p.y + p.pushY - cameraY;
+      }
+    } else if (p.t >= p.flyDuration) {
+      particles.splice(i, 1);
     }
   }
 }
@@ -592,6 +688,10 @@ function scrollMap(dy) {
   }
   hero.y -= dy;
   cameraY -= dy;
+  // stage-0 particles are buffer/world-space, same as hero.y - keep them
+  // glued to their dig position through the self-blit jump (stage-1 ones
+  // are already screen-space and need no correction).
+  for (const p of particles) if (p.stage === 0) p.y -= dy;
 }
 
 // RENDER HANDLERS
@@ -627,12 +727,13 @@ function render() {
       // TODO could also just draw the camera visible portion of the map
       BUFFER_CTX.drawImage(MAP, 0, 0, BUFFER.width, BUFFER.height);
       renderDust();
+      renderParticles();
       BUFFER_CTX.fillStyle = '#2255ee';
       BUFFER_CTX.fillRect(hero.x, hero.y, hero.w, hero.h);
       renderText('game screen', CHARSET_SIZE, CHARSET_SIZE);
       renderText('depth ' + depth, CAMERA_WIDTH - CHARSET_SIZE, CHARSET_SIZE, ALIGN_RIGHT);
       renderText('momentum ' + Math.round(hero.momentum), CAMERA_WIDTH - CHARSET_SIZE, 2 * CHARSET_SIZE + 4, ALIGN_RIGHT);
-      renderText('dust ' + dust, CAMERA_WIDTH - CHARSET_SIZE, 3 * CHARSET_SIZE + 8, ALIGN_RIGHT);
+      renderText('dust ' + dust, DUST_COUNTER_X, DUST_COUNTER_Y, ALIGN_RIGHT);
       // debugCameraWindow();
       // uncomment to debug mobile input handlers
       // renderDebugTouch();
@@ -643,6 +744,7 @@ function render() {
       // the outcome text.
       BUFFER_CTX.drawImage(MAP, 0, 0, BUFFER.width, BUFFER.height);
       renderDust();
+      renderParticles();
       BUFFER_CTX.fillStyle = '#2255ee';
       BUFFER_CTX.fillRect(hero.x, hero.y, hero.w, hero.h);
       renderText(outcome ? 'rainbow!' : 'out of momentum', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2, ALIGN_CENTER);
@@ -687,6 +789,33 @@ function renderDust() {
   DUST_LAYER_CTX.restore();
   DUST_LAYER_CTX.globalCompositeOperation = 'source-over';
   BUFFER_CTX.drawImage(DUST_LAYER, 0, 0, CAMERA_WIDTH, CAMERA_HEIGHT, cx, cy, CAMERA_WIDTH, CAMERA_HEIGHT);
+};
+
+// draw in-flight collection particles, easing (accelerating from rest) from
+// their spawn point toward the HUD dust counter. Particles are stored in
+// screen space (see spawnDustParticle), so re-adding the CURRENT camera
+// position here is what keeps a screen-fixed target correct every frame
+// despite the camera moving under them - and drawing onto BUFFER_CTX (not
+// TEXT) keeps them on the animation layer, under the HUD, per DESIGN.md.
+function renderParticles() {
+  for (const p of particles) {
+    let x, y, size;
+    if (p.stage === 0) {
+      // ease-out: grows fast then settles, reads as a "pop" toward the
+      // camera; pushX/pushY ride along so it clears the tunnel it just left.
+      const ease = 1 - (1 - Math.min(1, p.t / p.growDuration)) ** 2;
+      x = p.x + p.pushX * ease;
+      y = p.y + p.pushY * ease;
+      size = lerp(PARTICLE_SIZE, PARTICLE_SIZE * 2, ease);
+    } else {
+      const ease = Math.min(1, p.t / p.flyDuration) ** 2;    // ease-in: accelerating from rest
+      x = lerp(p.x0, DUST_COUNTER_X, ease) + cameraX;
+      y = lerp(p.y0, DUST_COUNTER_Y, ease) + cameraY;
+      size = PARTICLE_SIZE * 2;
+    }
+    BUFFER_CTX.fillStyle = p.color;
+    BUFFER_CTX.fillRect(Math.round(x - size / 2), Math.round(y - size / 2), size, size);
+  }
 };
 
 function renderEntity(entity, ctx = BUFFER_CTX) {
