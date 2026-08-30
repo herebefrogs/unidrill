@@ -30,10 +30,10 @@ const HERO_W = 28;                             // temporary blue square, real sp
 const HERO_H = 28;
 // how fast the drill rotates toward its 8-direction steering target
 // (radians/sec). Finite so the heading eases into the new direction rather
-// than snapping to one of 8 discrete angles - 2*PI = a full 180 in ~0.5s,
-// 90 in ~0.25s: progressive but not laggy. Playtest knob; Infinity would
+// than snapping to one of 8 discrete angles - 4*PI = a full 180 in ~0.25s,
+// 90 in ~0.125s: progressive but not laggy. Playtest knob; Infinity would
 // give a classic instant snap.
-const TURN_SPEED = 2 * Math.PI;
+const TURN_SPEED = 4 * Math.PI;
 
 // momentum loop tuning (px/sec, px/sec^2). The drill launches with a fixed
 // downward impulse (MOMENTUM.initial) that only ever decays: a baseline

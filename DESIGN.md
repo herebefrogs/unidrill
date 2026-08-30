@@ -73,7 +73,7 @@ The drill thrusts forward along its heading at a speed equal to its current
 momentum (which starts high and decays — see Core loop) — no throttle.
 Steering only. Both input paths work the same way: they pick an **absolute
 target heading**, and the drill's heading eases toward it at a fixed turn
-rate (`TURN_SPEED`, ~0.5s for a full 180°). Absolute, not relative — Up is
+rate (`TURN_SPEED`, ~0.25s for a full 180°). Absolute, not relative — Up is
 up whether descending or climbing, no inversion between the legs.
 
 - Keyboard: Arrow keys or WASD (plus Q for AZERTY-left), one per cardinal
