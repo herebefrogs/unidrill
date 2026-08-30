@@ -56,8 +56,8 @@ let heroWentDeep;                              // armed once depth passes MOMENT
 let outcome;                                   // true = win (rainbow), false = lose (bingo fuel); read on END_SCREEN
 let endReady;                                  // END_SCREEN: true once all inputs held at game-over have been released
 let depth;                                     // px drilled below the surface (world-space y, until infinite scroll lands)
-let dust;                                       // rainbow-dust cells collected this run (= DUG ∩ sampleDust), tallied at dig time.
-let particles;                                  // in-flight collection particles (screen-space, purely cosmetic - the dust tally above never waits on them)
+let dust;                                       // rainbow-dust cells collected this run (= DUG ∩ sampleDust), tallied when its particle lands on the counter (or instantly if the run ends first, see endGame()).
+let particles;                                  // in-flight collection particles (screen-space); each carries the one dust point it's still owed until it lands or endGame() tallies it early
 
 let speak;
 
@@ -163,9 +163,11 @@ DUST_GRADIENT.width = DUST_GRADIENT.height = DUST_P;
 }
 const DUST_PATTERN = DUST_LAYER_CTX.createPattern(DUST_GRADIENT, 'repeat');
 
-// collection animation: a dug dust cell detaches in two stages, purely
-// cosmetic - the dust tally itself is already final at dig time (see
-// `dust`). Stage 0 ("takeoff"): the cell doubles in size in place, at its
+// collection animation: a dug dust cell detaches in two stages, and its
+// dust point is only tallied when it lands (see `dust`, updateParticles()) -
+// unless the run ends first, in which case endGame() tallies whatever's
+// still in flight instantly so score doesn't depend on animation timing.
+// Stage 0 ("takeoff"): the cell doubles in size in place, at its
 // dig location - tracked in BUFFER/world space like the hero, so it rides
 // the camera scroll exactly like the terrain it detached from (including
 // scrollMap's paging jumps, see the particle loop there). Stage 1
@@ -537,6 +539,12 @@ function moveHero() {
 }
 
 function endGame(won) {
+  // the run can end (surfacing or bingo fuel) while particles are still
+  // mid-flight; tally their dust immediately instead of leaving the score
+  // dependent on how much of that cosmetic animation had time to finish.
+  // They're left in `particles` (marked counted) so they still finish
+  // flying visually on END_SCREEN.
+  for (const p of particles) if (!p.counted) { dust++; p.counted = true; }
   outcome = won;
   endReady = false;
   screen = END_SCREEN;
@@ -572,10 +580,11 @@ function dig(x, undergroundY) {
     // it's dug. +1 per cell regardless of category - "dense yields more" is
     // already delivered by dense patches being solid vs sparse's ~25% mask.
     // Dense cells also top momentum back up (per-cell; digShaft clears a few
-    // at once, so patch entry gives a jolt).
+    // at once, so patch entry gives a jolt). The +1 itself isn't tallied
+    // here - spawnDustParticle()'s particle carries it until it lands (or
+    // the run ends, see endGame()).
     const d = sampleDust(x, undergroundY);
     if (d !== DUST_NONE) {
-      dust++;
       spawnDustParticle(x, undergroundY);
       if (d === DUST_DENSE) hero.momentum = Math.min(MOMENTUM.max, hero.momentum + MOMENTUM.denseBoost);
     }
@@ -619,13 +628,14 @@ function spawnDustParticle(x, undergroundY) {
     growDuration: PARTICLE_GROW_DURATION + (Math.random() - 0.5) * PARTICLE_DURATION_JITTER,
     flyDuration: PARTICLE_FLY_DURATION + (Math.random() - 0.5) * PARTICLE_DURATION_JITTER,
     color: dustColorAt(x, undergroundY),
+    counted: false,   // set once its dust point has been tallied, by landing or by endGame() - guards against double-counting when both can happen
   });
 }
 
-// advance particles and drop any that have landed. Runs every frame
-// regardless of screen (see call site in update()) so a dig right before
-// game-over still finishes its animation on END_SCREEN instead of freezing
-// mid-air.
+// advance particles, tally the ones that land, and drop them. Runs every
+// frame regardless of screen (see call site in update()) so a dig right
+// before game-over still finishes its animation on END_SCREEN instead of
+// freezing mid-air.
 function updateParticles() {
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
@@ -642,6 +652,7 @@ function updateParticles() {
         p.y0 = p.y + p.pushY - cameraY;
       }
     } else if (p.t >= p.flyDuration) {
+      if (!p.counted) dust++;
       particles.splice(i, 1);
     }
   }

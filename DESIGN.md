@@ -115,13 +115,22 @@ composites onto the backbuffer between the `MAP` blit and the hero — fixed
 cost regardless of how much dust is on screen, no per-cell work in the frame
 loop. Dust must stay *out* of `MAP` (rows freeze colour as the buffer pages).
 
-**Collection animation.** When a dust cell is dug, its pixels detach and
-fly in a straight line toward the dust counter in the screen corner, moving
-under linear acceleration (ease-in), then vanish on arrival. The counter
-ticks up when the particle lands, not when the cell is dug. Particles are
-spawned into **screen space** and animate purely there — dust cells live in
-underground space and the camera scrolls, so a particle tracked in world
-space would drift off the counter.
+**Collection animation.** When a dust cell is dug, it detaches in two
+stages. Stage 0 ("takeoff"): the cell doubles in size in place, pushed
+radially outward from the drill so it clears the freshly-dug tunnel instead
+of sitting on top of it — tracked in **world/underground space**, same as
+the terrain, so it rides the camera scroll (including the buffer's
+self-blit paging jumps) exactly like the cell it detached from. Stage 1
+("flight"): it eases toward the dust counter in the screen corner under
+linear acceleration (ease-in), then vanishes on arrival. This stage
+switches to **screen space** — the camera re-centers on the hero every
+frame, so a particle still tracked in world space would drift off the
+(screen-fixed) counter instead of flying to it. The counter ticks up when
+the particle lands, not when the cell is dug — juicier, but it means a run
+that ends (bingo fuel or resurfacing) while particles are still mid-flight
+must tally their dust instantly rather than let the score depend on how
+much of the animation had time to finish; those particles keep flying
+visually after the tally, they just don't double-count on arrival.
 
 **Layer order** (far → near):
 
@@ -305,7 +314,9 @@ tunnel to resurface and it has to stay consistent.
 Collected dust needs **no set of its own**: a dust cell is collected iff
 it's both dug and in the dust field, i.e. `DUG` ∩ `sampleDust()`. The only
 dust state that persists is the running counter (`+1` per collected cell,
-plus a momentum top-up when the cell was DENSE).
+plus a momentum top-up when the cell was DENSE) — the `+1` lands when that
+cell's particle arrives at the HUD (or instantly on game-over if it's still
+mid-flight, see Graphics — Collection animation), not at dig time.
 
 - **Delta overlay** (`DUG`): a `Set` of carved cells, string key
   `x + '_' + undergroundY`, both `CELL_SIZE`-aligned. Coordinates are in
@@ -332,8 +343,8 @@ plus a momentum top-up when the cell was DENSE).
   the MAP buffer (and clears the same cell from `DUST_MASK`), so a cell stays
   carved when you scroll away and back. The once-per-cell `if (!DUG.has(key))`
   guard in `dig()` is where dust collection hooks in: if the new cell is in
-  the dust field, bump the counter (and momentum, if DENSE) and spawn its
-  fly-to-HUD particle.
+  the dust field, top up momentum (if DENSE) and spawn its fly-to-HUD
+  particle — the particle itself bumps the counter once it lands.
 
 ## Open questions
 

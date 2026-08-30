@@ -50,18 +50,17 @@ for the reasoning behind each of these; this is just the sequencing.
       `DUST_BAND` px/band) through it, composited between the MAP blit and
       hero. Rainbow is anchored to underground position + a constant time
       drift (`DUST_SPEED`), so it's decoupled from descent speed. Colour
-      tuning is a playtest item below. (b) Collection
-      particles: on dig, spawn the cell's pixels in screen space, fly them
-      to the HUD counter under linear acceleration, tick the counter on
-      arrival. See DESIGN.md "Graphics". (c) Hit-stop: freeze the sim for a
-      few frames on dense-patch entry (first dense cell of a tick) — try it,
-      see if the jolt reads as juicier or just laggy. (d) Decide when the
-      dust counter increments: on collect (dig time) vs. on particle arrival
-      at the HUD. Arrival is juicier but opens an edge case — a full stop
-      (bingo fuel / resurface) with particles still in flight would score
-      those as uncollected. Options: settle in-flight particles instantly on
-      game-over, or just accept the counter as "delivered dust" and score
-      off that. Tie-break depends on whether surfacing-to-score survives.
+      tuning is a playtest item below. (b) DONE — collection particles: on
+      dig, spawn the cell as a two-stage particle (grow + radial push clear
+      of the tunnel, then ease-in flight to the HUD counter); the counter
+      ticks on arrival. See DESIGN.md "Graphics". (c) Hit-stop: freeze the
+      sim for a few frames on dense-patch entry (first dense cell of a
+      tick) — try it, see if the jolt reads as juicier or just laggy.
+      (d) RESOLVED — counter ticks on particle arrival, juicier than dig-
+      time. Edge case handled: `endGame()` tallies any still-in-flight
+      particles' dust instantly (they keep animating on END_SCREEN, just
+      already counted), so a bingo-fuel/resurface stop never scores dust as
+      lost to the animation.
 - [ ] Bingo-fuel warning. HUD alert when the player likely can't make it
       back up. Approximate — we don't know the return path or the material
       along it — so estimate against a straight climb decaying at the sand
