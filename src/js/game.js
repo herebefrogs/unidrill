@@ -57,6 +57,7 @@ let outcome;                                   // true = win (rainbow), false = 
 let endReady;                                  // END_SCREEN: true once all inputs held at game-over have been released
 let depth;                                     // px drilled below the surface (world-space y, until infinite scroll lands)
 let dust;                                       // rainbow-dust cells collected this run (= DUG ∩ sampleDust), tallied when its particle lands on the counter (or instantly if the run ends first, see endGame()).
+let dustPop;                                     // gameTime of the last dust tally; drives the HUD counter's pop-and-shrink (see DUST_POP_DURATION)
 let particles;                                  // in-flight collection particles (screen-space); each carries the one dust point it's still owed until it lands or endGame() tallies it early
 
 let speak;
@@ -91,6 +92,7 @@ hero = {
 heroWentDeep = false;
 depth = 0;
 dust = 0;
+dustPop = -1;
 particles = [];
 // camera-window & edge-snapping settings
 const CAMERA_WINDOW_X = 400;
@@ -185,8 +187,14 @@ const PARTICLE_PUSH_MARGIN = CELL_SIZE * 3;   // how far stage 0 clears the tunn
 const PARTICLE_GROW_DURATION = 0.25;    // seconds, stage 0: growing in place
 const PARTICLE_FLY_DURATION = 0.6;      // seconds, stage 1: flight to the counter
 const PARTICLE_DURATION_JITTER = 0.2;   // +/- range, staggers arrivals on a multi-cell dig
-const DUST_COUNTER_X = CAMERA_WIDTH - CHARSET_SIZE;   // where the HUD 'dust N' label is drawn (also the particles' flight target)
-const DUST_COUNTER_Y = 3 * CHARSET_SIZE + 8;
+const PX_PER_M = 32;                                  // display-only: game logic is all px, the HUD converts to metres (depth) and m/s (speed)
+const HUD_SCALE = 3;                                  // bitmap-font magnification for the in-game HUD lines
+const HUD_LINE = HUD_SCALE * CHARSET_SIZE + 4;        // px between stacked HUD lines
+const HUD_X = CHARSET_SIZE;                           // left-aligned HUD origin (labels stay put as values gain/lose digits)
+const HUD_ADVANCE = HUD_SCALE * (CHARSET_SIZE + 1);   // px per glyph at HUD_SCALE
+const DUST_COUNTER_X = HUD_X + 7 * HUD_ADVANCE;       // where the 'dust:  ' value starts (also the particles' flight target)
+const DUST_COUNTER_Y = CHARSET_SIZE + 2 * HUD_LINE;   // 3rd HUD line (speed, depth, dust)
+const DUST_POP_DURATION = 0.18;                       // seconds: the counter value swells to 2x and back on each tally
 
 const TEXT = initTextBuffer(c, CAMERA_WIDTH, CAMERA_HEIGHT);  // text buffer
 
@@ -237,6 +245,7 @@ function startGame() {
   outcome = undefined;
   depth = 0;
   dust = 0;
+  dustPop = -1;
   particles = [];
   renderMap();
   screen = GAME_SCREEN;
@@ -659,7 +668,7 @@ function updateParticles() {
         p.y0 = p.y + p.pushY - cameraY;
       }
     } else if (p.t >= p.flyDuration) {
-      if (!p.counted) dust++;
+      if (!p.counted) { dust++; dustPop = gameTime; }
       particles.splice(i, 1);
     }
   }
@@ -748,10 +757,16 @@ function render() {
       renderParticles();
       BUFFER_CTX.fillStyle = '#2255ee';
       BUFFER_CTX.fillRect(hero.x, hero.y, hero.w, hero.h);
-      renderText('game screen', CHARSET_SIZE, CHARSET_SIZE);
-      renderText('depth ' + depth, CAMERA_WIDTH - CHARSET_SIZE, CHARSET_SIZE, ALIGN_RIGHT);
-      renderText('momentum ' + Math.round(hero.momentum), CAMERA_WIDTH - CHARSET_SIZE, 2 * CHARSET_SIZE + 4, ALIGN_RIGHT);
-      renderText('dust ' + dust, DUST_COUNTER_X, DUST_COUNTER_Y, ALIGN_RIGHT);
+      renderText('speed: ' + Math.round(hero.momentum / PX_PER_M) + 'm/s', HUD_X, CHARSET_SIZE, ALIGN_LEFT, HUD_SCALE);
+      renderText('depth: ' + (depth / PX_PER_M).toFixed(1) + 'm', HUD_X, CHARSET_SIZE + HUD_LINE, ALIGN_LEFT, HUD_SCALE);
+      renderText('dust:', HUD_X, DUST_COUNTER_Y, ALIGN_LEFT, HUD_SCALE);
+      // the value briefly swells to 2x and back on each tally (see dustPop); grow about the number's own centre so it pops in place
+      {
+        const str = '' + dust;
+        const s = HUD_SCALE * (1 + Math.sin(clamp((gameTime - dustPop) / DUST_POP_DURATION, 0, 1) * Math.PI));
+        const cx = DUST_COUNTER_X + (str.length * HUD_SCALE * (CHARSET_SIZE + 1) - HUD_SCALE) / 2;
+        renderText(str, cx, DUST_COUNTER_Y - (s - HUD_SCALE) * CHARSET_SIZE / 2, ALIGN_CENTER, s);
+      }
       // debugCameraWindow();
       // uncomment to debug mobile input handlers
       // renderDebugTouch();
@@ -765,10 +780,10 @@ function render() {
       renderParticles();
       BUFFER_CTX.fillStyle = '#2255ee';
       BUFFER_CTX.fillRect(hero.x, hero.y, hero.w, hero.h);
-      renderText(outcome ? 'rainbow!' : 'out of momentum', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2, ALIGN_CENTER);
-      renderText('depth ' + depth, CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + 2 * CHARSET_SIZE, ALIGN_CENTER);
-      renderText('dust ' + dust, CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + 3 * CHARSET_SIZE, ALIGN_CENTER);
-      if (endReady) renderText(isMobile ? 'tap to retry' : 'press any key', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + 4 * CHARSET_SIZE, ALIGN_CENTER);
+      renderText(outcome ? 'rainbow!' : 'tapped out!', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 - 2 * HUD_LINE, ALIGN_CENTER, HUD_SCALE + 1);
+      renderText('depth: ' + (depth / PX_PER_M).toFixed(1) + 'm', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + HUD_LINE, ALIGN_CENTER, HUD_SCALE);
+      renderText('dust: ' + dust, CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + 2 * HUD_LINE, ALIGN_CENTER, HUD_SCALE);
+      if (endReady) renderText(isMobile ? 'tap to retry' : 'press any key', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + 4 * HUD_LINE, ALIGN_CENTER, HUD_SCALE);
       // renderText(monetizationEarned(), TEXT.width - CHARSET_SIZE, TEXT.height - 2*CHARSET_SIZE, ALIGN_RIGHT);
       break;
   }
