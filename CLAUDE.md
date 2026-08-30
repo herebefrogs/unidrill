@@ -5,7 +5,7 @@
 
  | File | What's in it |
  |---|---|
- | `src/js/game.js` | **Everything gameplay**: RAF loop, the 3 screens (TITLE/GAME/END), `hero` state + `moveHero()` + momentum/drag + win-lose, camera follow, the `MAP` buffer paging (`scrollMap`/`paintRow`), digging (`digShaft`/`dig`/`DUG`), the dust rainbow layer (`DUST_MASK`/`DUST_GRADIENT`/`DUST_PATTERN`/`renderDust`), all rendering, input dispatch (`processInputs`). |
+ | `src/js/game.js` | **Everything gameplay**: RAF loop, the 3 screens (TITLE/GAME/END), `hero` state + `moveHero()` + momentum/drag + win-lose, camera follow, the `MAP` buffer paging (`scrollMap`/`paintRow`), digging (`digShaft`/`dig`/`DUG`), the dust rainbow layer (`DUST_MASK`/`DUST_GRADIENT`/`DUST_PATTERN`/`renderDust`), dust collection particles (`spawnDustParticle`/`updateParticles`/`renderParticles`), all rendering, input dispatch (`processInputs`). |
  | `src/js/terrain.js` | Pure procedural terrain: `sampleMaterial(x,y)` (macro sections + rock-blob pass) and `sampleDust(x,y)` → `DUST_NONE`/`SPARSE`/`DENSE` (own microgrid, wobbly patches, quarter-grid dither for sparse). `CELL_SIZE`, materials `SAND`/`CLAY`, `MATERIAL_COLOR`, `MATERIAL_DRAG`. All keyed off the stateless `hash2D` — nothing stored, recomputed on demand. |
  | `src/js/inputs/keyboard.js`, `inputs/pointer.js` | Raw input capture only (see Game engine below). `pointer.js`'s drag-direction logic is deliberately unusual — ask before touching. |
  | `src/js/text.js` | Bitmap text (`renderText`, `CHARSET_SIZE`, `ALIGN_*`). |
@@ -42,6 +42,15 @@
    anything transient/cosmetic (particles, sound variation) draws from it
    or a fresh generator, **never** from `hash2D`. `hash2D` has no seed
    wired in yet (identical map every run); the "RNG seeds" TODO adds one.
+ - **Cosmetic timing must use `gameTime`, never `currentTime`.** `currentTime`
+   is raw `performance.now()` — it keeps advancing wall-clock time even
+   while the RAF loop isn't running (paused, tab hidden). `gameTime` is a
+   running total of `elapsedTime`, only accumulated inside `loop()`'s
+   `running` guard, so pausing freezes it. Anything that animates off the
+   passage of time during gameplay (the dust rainbow phase in
+   `dustColorAt()`/`renderDust()`) must key off `gameTime` — using
+   `currentTime` there showed up as a big colour jump on pause/resume (the
+   wall-clock gap leaking into the phase).
  - **Cell-index math uses `Math.floor`, not `| 0`.** They diverge for
    negative coords (`| 0` truncates toward zero → a double-wide cell and a
    mirror seam at the origin). Harmless while everything is `x >= 0`; will
