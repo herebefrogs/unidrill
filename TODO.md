@@ -78,24 +78,20 @@ for the reasoning behind each of these; this is just the sequencing.
       already counted), so a bingo-fuel/resurface stop never scores dust as
       lost to the animation. Counter value also pops 2x-and-back on each
       tick (`DUST_POP_DURATION`), undebounced — see the game-feel memory.
-- [ ] Bingo-fuel warning. HUD alert when the player likely can't make it
-      back up. Approximate — we don't know the return path or the material
-      along it — so estimate against a straight climb decaying at the sand
-      rate: reachable distance ≈ `momentum^2 / (2 * (entropy + sandDrag))`
-      (momentum decays linearly to zero, so travel is the area under it).
-      Warn when that's below `depth`, plus a threshold band (warn while
-      within ~5–10% of the cutoff, before it's already lost). Tune the
-      decay rate used against playtests — tunnel-drag rate if backtracking
-      a dug shaft is the expected escape, sand rate if fresh digging up is
-      typical.
-- [ ] Add ROCK as a third material. Solid and undrillable — the drill can't
-      carve it. On contact it deflects the player's heading (bounce) rather
-      than stopping them dead. See DESIGN.md (materials, and the rock
-      deflection open question).
-- [ ] Horizontal camera panning. Camera x is pinned to 0 right now
-      (`followCamera()` only touches y; `updateCameraWindow()` has x logic
-      but is never called). Needed before edge collision can clamp to the
-      real map edge instead of the viewport.
+- [ ] Sprout a rainbow on run end (momentum runs out OR resurface — both are
+      now wins, the run just ends, see "Won't do: bingo-fuel warning"). Three
+      parts:
+      1. Score. `score = fn(dust, depth)` — form TBD (both terms reward,
+         weight against playtests). Update DESIGN.md Win/lose when this lands.
+      2. Rainbow in the sky. Camera fast-scrolls up to the surface; a rainbow
+         grows out of the tunnel mouth into the sky, its width proportional
+         to `score`.
+      3. Rainbow beam up the tunnel. While the camera scrolls up, a rainbow
+         stream starts at the player sprite and backtracks the tunnel to the
+         surface. Keep a running list of approximate segments as the player
+         drills (append as the shaft is carved); the beam walks that list
+         back. Camera locks onto the beam's tip instead of the player for the
+         duration. Ties into the "drop resurfacing as a win" idea below.
 - [ ] Camera tracking: position-locking + lerp-smoothing. Camera aims to
       hold the player at the exact screen center, but lets them drift away
       temporarily (e.g. a dense-dust velocity boost) and each frame lerps
@@ -184,6 +180,16 @@ for the reasoning behind each of these; this is just the sequencing.
       retire src/js/text.js (`renderText`/charset sprite/`CHARSET_SIZE`/
       `ALIGN_*`) in favour of plain canvas `fillText` — touches every HUD
       + screen-text call site and the `scale`/`HUD_*` layout math.
+- [ ] Add ROCK as a third material. Solid and undrillable — the drill can't
+      carve it. On contact it deflects the player's heading (bounce) rather
+      than stopping them dead. See DESIGN.md (materials, and the rock
+      deflection open question). Deprioritised — the core loop works without
+      a hard obstacle for now.
+- [ ] Horizontal camera panning. Camera x is pinned to 0 right now
+      (`followCamera()` only touches y; `updateCameraWindow()` has x logic
+      but is never called). Needed before edge collision can clamp to the
+      real map edge instead of the viewport. Deprioritised — the viewport-
+      edge clamp + peel-off is good enough while the map is one screen wide.
 
 ## Ideas — not yet designed
 
@@ -215,6 +221,14 @@ Half-formed; each needs a design pass before it becomes a build item.
       mechanic if there's nothing to conserve fuel for.
 
 ## Won't do
+
+- Bingo-fuel warning. Was: a HUD alert when the player likely can't climb
+  back out (reachable distance ≈ `momentum^2 / (2*(entropy + sandDrag))`,
+  warn when that drops below `depth`). Dropped with the objective change —
+  the player now wins whether they resurface or not (the run just ends when
+  momentum hits 0, wherever they are, and a rainbow sprouts back up the
+  tunnel). There's no failed-return-trip to warn about any more; depth
+  reached just feeds the score. See "Sprout a rainbow on run end".
 
 - Rainbow dust — carry penalty. DESIGN.md's old core-loop line said
   "carrying more dust drains momentum faster"; the idea was to scale
