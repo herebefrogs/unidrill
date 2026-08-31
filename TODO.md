@@ -16,9 +16,16 @@ for the reasoning behind each of these; this is just the sequencing.
       backtracking doesn't lose dug-location history.
 - [x] Start tracking player velocity and angle: switch to real controls
       (left/right banks the drill left/right, applied to angle).
-- [x] Handle colliding with the vertical edges of the map. (Currently a
-      hard clamp of `hero.x` to the viewport width in `moveHero()` — no
-      horizontal camera panning yet, so viewport edge == map edge for now.)
+- [x] Handle colliding with the vertical edges of the map. `hero.x` is
+      hard-clamped to the viewport width in `moveHero()` (no horizontal
+      camera panning yet, so viewport edge == map edge for now); on top of
+      that `processInputs()` drops the into-wall input component and, if
+      nothing steerable is left, redirects along the wall (full up if the
+      heading was above horizontal, else full down) through the normal
+      `TURN_SPEED` ease — so a drill pinned on an edge peels off instead of
+      grinding in place. Same mechanism gives the surface a soft ceiling:
+      before `heroWentDeep`, breaching >1 drill-height forces a full dive so
+      the drill porpoises back under rather than flying into the sky.
 - [x] Momentum / entropy / material drag. Fixed launch impulse
       (`MOMENTUM` config in game.js), decays each frame by entropy + drag
       from the material at the drill's leading edge (`MATERIAL_DRAG` in
@@ -109,11 +116,6 @@ for the reasoning behind each of these; this is just the sequencing.
 
 ## Bugs
 
-- [ ] Player continues upward into the sky past the surface line. (Moot on
-      the game screen now — the resurface win fires at `depth <= 0` before
-      the hero climbs far — but the underlying world-space surface clamp was
-      removed, so revisit if a post-win fly-up or a title-screen preview
-      needs it.)
 - [ ] In portrait screen ratio, the canvas should use the whole screen to
       show as much of the underground as possible. Revisit the locked-ratio
       logic then — it may be wrong regardless of screen orientation.

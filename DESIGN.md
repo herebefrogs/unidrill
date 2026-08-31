@@ -100,6 +100,20 @@ up whether descending or climbing, no inversion between the legs.
   touch quirk and is deliberately unusual — get the full context from
   Jerome before changing it.
 
+**World edges.** The drill can't cross the map's boundaries; both cases feed
+a corrected target heading through the same `TURN_SPEED` ease, never a hard
+stop:
+
+- Left/right walls: the into-wall component of the input is dropped. If
+  that leaves no input at all, the drill is redirected along the wall —
+  full up if it was heading above horizontal, full down otherwise.
+- Surface: no hard ceiling. Before the resurface win is armed
+  (`heroWentDeep`), breaching more than one drill-height above the surface
+  forces a full dive on the vertical input, so the drill porpoises back
+  under instead of coasting off into the drag-free sky (holding Up just
+  skips it along the surface, bleeding momentum, until it goes deep or taps
+  out). Once `heroWentDeep`, reaching the surface wins before this triggers.
+
 `TURN_SPEED` is still being tuned against playtests (see TODO.md); the
 model itself — absolute heading vs. the old bank — is also provisional
 until playtesters weigh in.

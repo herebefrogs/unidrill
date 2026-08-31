@@ -459,20 +459,47 @@ function processInputs() {
       // hero.angle (see moveHero). Both input paths pick an ABSOLUTE target
       // heading - Up is up on the descent AND the climb, no bank-model
       // inversion - then hero.angle rotates toward it at TURN_SPEED.
-      let target;
+      let dx = 0, dy = 0;
       if (isPointerDown()) {
-        const [vX, vY] = pointerDirection();
-        if (vX || vY) target = Math.atan2(vY, vX);
+        [dx, dy] = pointerDirection();
       } else {
         // e.code is physical: AZERTY's ZQSD sits on physical KeyW/KeyQ/KeyS/
         // KeyD, so KeyW/KeyS already serve both layouts; only left needs KeyQ.
-        const dx = (isKeyDown('ArrowRight', 'KeyD') ? 1 : 0)
-                 - (isKeyDown('ArrowLeft', 'KeyA', 'KeyQ') ? 1 : 0);
-        const dy = (isKeyDown('ArrowDown', 'KeyS') ? 1 : 0)
-                 - (isKeyDown('ArrowUp', 'KeyW') ? 1 : 0);
-        if (dx || dy) target = Math.atan2(dy, dx);
+        dx = (isKeyDown('ArrowRight', 'KeyD') ? 1 : 0)
+           - (isKeyDown('ArrowLeft', 'KeyA', 'KeyQ') ? 1 : 0);
+        dy = (isKeyDown('ArrowDown', 'KeyS') ? 1 : 0)
+           - (isKeyDown('ArrowUp', 'KeyW') ? 1 : 0);
       }
-      // nothing held -> coast on the current heading (momentum game, no neutral)
+      // normalise so a forced edge redirect below mixes with input at a sane
+      // ratio (a long pointer drag would otherwise swamp the injected term);
+      // the turn maths only cares about direction, so this is a no-op for the
+      // ordinary case.
+      const len = Math.hypot(dx, dy);
+      if (len) { dx /= len; dy /= len; }
+
+      // the world's hard edges can't be drilled through: cancel any input
+      // component pointing into one, and if the drill is pinned there with
+      // nothing valid left to do, redirect it ALONG the edge - the same eased
+      // turn as a real steering input - rather than letting it grind in place
+      // (momentum bleeds, no progress, drill stuck / creeping).
+      const atLeft  = hero.x <= 0;
+      const atRight = hero.x >= CAMERA_WIDTH - hero.w;
+      if (atRight) dx = Math.min(dx, 0);
+      if (atLeft)  dx = Math.max(dx, 0);
+      // porpoise the drill back under: while the resurface win isn't armed
+      // yet (heroWentDeep), a breach clearing the surface by more than a drill
+      // height forces a full dive on the y input - eased through TURN_SPEED
+      // like a real press, so it arcs back down instead of sailing off into
+      // the drag-free sky. Once heroWentDeep, moveHero's depth<=0 win fires
+      // before this and the breach is a clean surfacing. dx is left alone so
+      // the arc can still be steered sideways.
+      const breach = SURFACE_Y - mapOffset - hero.y - hero.h;   // >0 when the whole drill is above the surface line
+      if (!heroWentDeep && breach > hero.h) dy = 1;
+      else if ((atLeft || atRight) && !dx && !dy) dy = hero.velY < 0 ? -1 : 1;
+
+      let target;
+      if (dx || dy) target = Math.atan2(dy, dx);
+      // nothing held, no edge -> coast on the current heading (momentum game, no neutral)
       if (target !== undefined) {
         // shortest signed turn to the target, wrapped to [-PI, PI] so a 180
         // press doesn't pick the long way round
