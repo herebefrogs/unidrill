@@ -5,7 +5,7 @@
 
  | File | What's in it |
  |---|---|
- | `src/js/game.js` | **Everything gameplay**: RAF loop, the 3 screens (TITLE/GAME/END), `hero` state + `moveHero()` + momentum/drag + win-lose + the overspeed bleed (`MOMENTUM.max`/`overMax`/`overBleed`), camera follow, the `MAP` buffer paging (`scrollMap`/`paintRow`), digging (`digShaft`/`dig`/`DUG`), the dust rainbow layer (`DUST_MASK`/`DUST_GRADIENT`/`DUST_PATTERN`/`renderDust`), dust collection particles (`spawnDustParticle`/`updateParticles`/`renderParticles`), the HUD (`HUD_*`/`PX_PER_M`/`DUST_COUNTER_*`/`DUST_POP_DURATION`/`SPEED_VALUE_*`, drawn inline in `render()` — both the `dust:` and `speed:` values are drawn separately from their labels so only the number does the 2x pop), all rendering, input dispatch (`processInputs`). |
+ | `src/js/game.js` | **Everything gameplay**: RAF loop, the 3 screens (TITLE/GAME/END), `hero` state + `moveHero()` + momentum/drag + win-lose + the overspeed bleed (`MOMENTUM.max`/`overMax`/`overBleed`), camera follow, viewport sizing (`RENDER_SCALE`/`resizeViewport`/`reanchorBuffer`), the `MAP` buffer paging (`scrollMap`/`paintRow`), digging (`digShaft`/`dig`/`DUG`), the dust rainbow layer (`DUST_MASK`/`DUST_GRADIENT`/`DUST_PATTERN`/`renderDust`), dust collection particles (`spawnDustParticle`/`updateParticles`/`renderParticles`), the HUD (`HUD_*`/`PX_PER_M`/`DUST_COUNTER_*`/`DUST_POP_DURATION`/`SPEED_VALUE_*`, drawn inline in `render()` — both the `dust:` and `speed:` values are drawn separately from their labels so only the number does the 2x pop), all rendering, input dispatch (`processInputs`). |
  | `src/js/terrain.js` | Pure procedural terrain: `sampleMaterial(x,y)` (macro sections + rock-blob pass) and `sampleDust(x,y)` → `DUST_NONE`/`SPARSE`/`DENSE` (own microgrid, wobbly patches, quarter-grid dither for sparse). `CELL_SIZE`, materials `SAND`/`CLAY`, `MATERIAL_COLOR`, `MATERIAL_DRAG`. All keyed off the stateless `hash2D` — nothing stored, recomputed on demand. |
  | `src/js/inputs/keyboard.js`, `inputs/pointer.js` | Raw input capture only (see Game engine below). `pointer.js`'s drag-direction logic is deliberately unusual — ask before touching. |
  | `src/js/text.js` | Bitmap text (`renderText`, `CHARSET_SIZE`, `ALIGN_*`). `renderText`'s 5th arg is an integer `scale` (HUD draws at 3). |
@@ -21,6 +21,24 @@
    compare `hero.y` to `SURFACE_Y` — `scrollMap()` mutates `hero.y`,
    `cameraY` and `mapOffset` together, so world-space `hero.y` drifts while
    `depth` stays invariant.
+ - **The viewport is window-sized; `RENDER_SCALE` is the one size knob.**
+   `RENDER_SCALE` (screen px per world px) is fixed on every device so
+   sprites/HUD never shrink on a small screen. `resizeViewport()` derives
+   `CAMERA_WIDTH`/`CAMERA_HEIGHT` from the live window (`window /
+   RENDER_SCALE`, clamped `VIEW_MIN..VIEW_MAX`, cell-snapped) and
+   *reallocates every offscreen buffer* — `BUFFER`/`MAP`/`DUST_MASK` are
+   viewport-width × 2× viewport-height (no horizontal paging yet, so
+   `MAP.width == CAMERA_WIDTH`), `DUST_LAYER`/`TEXT` viewport-sized;
+   `DUST_PATTERN` and `TEXT` are `let`, re-created on resize. Resizing a
+   canvas wipes it and resets its ctx (smoothing re-disabled in
+   `resizeViewport`); `reanchorBuffer()` then re-seats the hero at the new
+   buffer's centre (folding the shift into `mapOffset`, `depth` invariant)
+   and repaints — without it a post-realloc `followCamera()` scroll delta
+   can exceed the buffer and permanently desync `mapOffset`. Consequence:
+   the playfield (`hero.x` clamp) is the viewport, so it's ~5× wider on
+   desktop than a phone — the "Option 2" panning TODO fixes that.
+   `CAMERA_WINDOW_*` consts are computed from the 1280/960 placeholders at
+   module load and are stale/negative on mobile — don't trust them.
  - **The HUD reads metric; the sim is all pixels.** `depth` and
    `hero.momentum` are pixels. `PX_PER_M` (32) exists *only* to convert them
    for the on-screen readout (`depth: 12.4m`, `speed: 19m/s`) — never feed it

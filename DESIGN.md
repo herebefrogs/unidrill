@@ -106,7 +106,12 @@ stop:
 
 - Left/right walls: the into-wall component of the input is dropped. If
   that leaves no input at all, the drill is redirected along the wall —
-  full up if it was heading above horizontal, full down otherwise.
+  full up if it was heading above horizontal, full down otherwise. The
+  wall positions are the viewport edges, and the viewport width is derived
+  from the window (see Graphics), so the playfield is genuinely narrower on
+  a phone than on desktop. Restoring a device-independent playfield needs
+  horizontal camera panning (TODO.md) — until then the wider horizontal
+  room on desktop is an accepted inconsistency.
 - Surface: no hard ceiling. Before the resurface win is armed
   (`heroWentDeep`), breaching more than one drill-height above the surface
   forces a full dive on the vertical input, so the drill porpoises back
@@ -123,6 +128,17 @@ until playtesters weigh in.
 2D side view, pixel art. Camera shake for impact. (Hit-stop on dense-patch
 entry was prototyped and dropped — a few frozen frames read as jank, not
 juice; the dense-boost surge now carries that beat instead, see Win/lose.)
+
+**Viewport.** One fixed knob, `RENDER_SCALE` (screen px per world px), sets
+how big everything renders — dust cell, HUD glyph, drill — and it is the
+same on every device, so a phone never gets a shrunken-looking game. The
+viewport dimensions in world px are then derived from the live window
+(`window / RENDER_SCALE`, clamped, snapped to the cell grid) and every
+offscreen buffer is reallocated to match on resize/rotate. The trade: a
+smaller window shows fewer world px, so the horizontal playfield shrinks on
+mobile (see Controls → World edges). Vertical is the tension axis and gets
+whatever height the window gives; the sky band above the surface stays a
+fixed height, all extra vertical space goes underground.
 
 **Dust rainbow.** Dust cells are coloured by sampling a **repeating diagonal
 rainbow** (↘, top-left → bottom-right) — `DUST_PALETTE`, the 7 rainbow hues
@@ -360,12 +376,15 @@ mid-flight, see Graphics — Collection animation), not at dig time.
   space — so a cell keeps its identity after the buffer pages away and back.
   Naturally bounded by how far the unicorn travels before momentum runs out;
   no eviction logic for a jam-length session.
-- **MAP buffer**: an offscreen canvas 2× the camera size. It is *not* rebuilt
+- **MAP buffer**: an offscreen canvas the viewport width and 2× the
+  viewport height (width == viewport because there is no horizontal paging
+  yet; the 2× height is the vertical paging lookahead). It is *not* rebuilt
   from `sampleMaterial()` each frame — it's paged: `scrollMap()` self-blits
   the existing pixels by the scroll delta, then `paintRow()` repaints only
   the newly-exposed `CELL_SIZE` strip (sky above `SURFACE_Y`, else
-  `DUG.has(cell)` ? tunnel : material colour). The 2× size is the lookahead
-  margin that lets paging happen in occasional jumps, not every frame.
+  `DUG.has(cell)` ? tunnel : material colour). The 2× height is the
+  lookahead margin that lets paging happen in occasional jumps, not every
+  frame.
   Dust is **not** in this buffer — its colour comes from a drifting rainbow
   sampled per frame, so a baked colour would freeze per row as it pages.
 - **DUST_MASK buffer**: same size and paging as `MAP`, holds only dust-cell

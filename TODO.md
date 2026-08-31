@@ -18,7 +18,9 @@ for the reasoning behind each of these; this is just the sequencing.
       (left/right banks the drill left/right, applied to angle).
 - [x] Handle colliding with the vertical edges of the map. `hero.x` is
       hard-clamped to the viewport width in `moveHero()` (no horizontal
-      camera panning yet, so viewport edge == map edge for now); on top of
+      camera panning yet, so viewport edge == map edge for now — note the
+      viewport width is now device-dependent, see the panning item below);
+      on top of
       that `processInputs()` drops the into-wall input component and, if
       nothing steerable is left, redirects along the wall (full up if the
       heading was above horizontal, else full down) through the normal
@@ -120,9 +122,7 @@ for the reasoning behind each of these; this is just the sequencing.
 
 ## Bugs
 
-- [ ] In portrait screen ratio, the canvas should use the whole screen to
-      show as much of the underground as possible. Revisit the locked-ratio
-      logic then — it may be wrong regardless of screen orientation.
+(none open)
 
 ## Playtest / gameplay balancing
 
@@ -151,7 +151,12 @@ for the reasoning behind each of these; this is just the sequencing.
       depth in m). Confirm the numbers read right in play and that the larger
       font isn't crowding the play area on the smallest target viewport
       (portrait mobile especially). `PX_PER_M`, `HUD_SCALE`, `DUST_POP_DURATION`
-      are the knobs.
+      are the knobs. Layout constraint (see the `RENDER_SCALE` comment in
+      game.js): the widest HUD string must fit in `CAMERA_WIDTH`, and at
+      `RENDER_SCALE = 1` a ~393px phone leaves essentially zero margin — bump
+      `RENDER_SCALE` only with a matching `HUD_SCALE` drop, checked on the
+      narrowest target. If Option 2 lands (panning item below), this keys off
+      the viewport width, which stops being the playfield width.
 
 - [ ] Rainbow dust palette (`DUST_PALETTE` in game.js). The 7 swatches are
       currently held dark/desaturated to kill the blinding yellow-green-cyan
@@ -193,11 +198,24 @@ for the reasoning behind each of these; this is just the sequencing.
       than stopping them dead. See DESIGN.md (materials, and the rock
       deflection open question). Deprioritised — the core loop works without
       a hard obstacle for now.
-- [ ] Horizontal camera panning. Camera x is pinned to 0 right now
-      (`followCamera()` only touches y; `updateCameraWindow()` has x logic
-      but is never called). Needed before edge collision can clamp to the
-      real map edge instead of the viewport. Deprioritised — the viewport-
-      edge clamp + peel-off is good enough while the map is one screen wide.
+- [ ] Horizontal camera panning (a.k.a. "Option 2"). Wanted now, not
+      deprioritised: since `RENDER_SCALE` pins screen-px-per-world-px, the
+      viewport spans `innerWidth / RENDER_SCALE` *world* px, so the playfield
+      (== viewport, `hero.x` clamped to `CAMERA_WIDTH`) is ~392 world px on a
+      phone vs ~1920 on desktop — maneuvering room varies ~5x by device,
+      which cramps the map badly on mobile. Option 2 fixes the playfield
+      width across devices and pans the camera within it.
+      Structurally: a fixed `PLAYFIELD_WIDTH` decoupled from `CAMERA_WIDTH`;
+      `hero.x` clamps to the playfield, not the viewport; `cameraX` follows
+      the hero (`followCamera()` only touches y today; `updateCameraWindow()`
+      has x logic but is never called); MAP/DUST_MASK width goes back above
+      viewport width for paging lookahead and `scrollMap()`/`paintRow()` gain
+      an x axis; edge collision then clamps to the real playfield edge.
+      First: the `CAMERA_WINDOW_*` consts are stale — computed at module load
+      from the 1280/960 placeholders, before `resizeViewport()` overwrites
+      `CAMERA_WIDTH`/`CAMERA_HEIGHT`, and `CAMERA_WINDOW_X = 400` now exceeds
+      a phone's whole viewport width (negative `CAMERA_WINDOW_WIDTH`).
+      Recompute them in `resizeViewport()` or delete and rederive.
 
 ## Ideas — not yet designed
 
