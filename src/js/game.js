@@ -66,16 +66,20 @@ let speak;
 
 // RENDER VARIABLES
 
-let cameraX = 0;                        // viewport's top-left in playfield space; followCamera() pans it to keep the hero centred, clamped to [0, PLAYFIELD_WIDTH - CAMERA_WIDTH]
+// viewport's top-left in BUFFER space (both axes). followCamera() keeps the
+// hero centred; when the camera drifts past a buffer edge scrollMap() pages
+// that axis and re-seats cameraX/cameraY near the middle again. Fractional
+// (blit/clearBuffer/renderDust all Math.floor it).
+let cameraX = 0;
 let cameraY = 0;
 // screen pixels per world pixel - the ONE knob for how big everything (dust
 // cells, HUD font, hero) renders. blit() stretches the viewport onto the
 // canvas by exactly this factor on every device, so a dust cell is always
 // CELL_SIZE*RENDER_SCALE screen px and never shrinks on a small display.
 // The cost: the viewport then spans innerW/RENDER_SCALE worth of *world* px,
-// so a phone's playfield is genuinely narrower (fewer world px) than a
-// desktop's - horizontal is maneuvering room, the tension axis is vertical,
-// accepted trade. Larger value = chunkier sprites, less world on screen.
+// so a phone genuinely sees fewer world px than a desktop - the map is
+// unbounded both ways so nothing is walled off, you just see less of it at
+// once. Larger value = chunkier sprites, less world on screen.
 //   COUPLED WITH HUD_SCALE: the widest HUD string ("tapped out!" at
 //   HUD_SCALE+1, ~392 world px centred; "depth: 123.4m" ~356 left-aligned)
 //   must fit in CAMERA_WIDTH. At RENDER_SCALE 1 a ~393px phone gives ~392
@@ -84,36 +88,32 @@ let cameraY = 0;
 //   narrowest target.
 const RENDER_SCALE = 1;
 const VIEW_MIN = 256;                   // clamp floor for either viewport axis - only guards absurdly small windows; a clamped axis means letterbox (see resizeViewport), so keep it below every real device
-const VIEW_MAX = 2048;                  // clamp ceiling: the 2x-tall scroll buffer is then 4096, the safe canvas-dimension cap (iOS Safari). 4K-and-up displays pillarbox/letterbox the excess.
+const VIEW_MAX = 2048;                  // clamp ceiling on either viewport axis: the 2x scroll buffer is then 4096, the safe canvas-dimension cap (iOS Safari). 4K-and-up displays pillarbox/letterbox the excess.
 // camera/viewport size in world px. BOTH axes are derived from the live window
 // size in resizeViewport() (= innerW/H / RENDER_SCALE, clamped) and every
-// offscreen buffer is reallocated to match.
+// offscreen buffer is reallocated to 2x this each way (scroll lookahead).
 let CAMERA_WIDTH = 1280;                // real values set by resizeViewport() before the first paint
 let CAMERA_HEIGHT = 960;
-// playfield width in world px - the horizontal bounds the hero is clamped to,
-// device-independent so maneuvering room doesn't shrink on a phone. The
-// viewport pans across it (cameraX). max(MIN, viewport) so a desktop whose
-// window is already wider just gets playfield == viewport (cameraX pinned 0,
-// identical to before panning existed). No horizontal buffer paging: the
-// whole playfield lives in the MAP/BUFFER/DUST_MASK buffers at once, so their
-// width is PLAYFIELD_WIDTH. Bumping PLAYFIELD_MIN costs buffer memory
-// linearly (3 buffers * PLAYFIELD_WIDTH * 2*CAMERA_HEIGHT * 4B) - ~26MB at
-// 1280 on a tall phone, so it's the number that gates how wide this can go.
-const PLAYFIELD_MIN = 1280;             // == the old fixed CAMERA_WIDTH, i.e. the horizontal feel before panning
-let PLAYFIELD_WIDTH = PLAYFIELD_MIN;    // real value set by resizeViewport()
 const SURFACE_Y = 360;                  // world y of ground level - a FIXED sky band, deliberately not CAMERA_HEIGHT/2: extra vertical space all goes underground, and hero.y/depth/mapOffset stay valid across a live rotate because this constant never moves
 const SKY_COLOR = '#9fd8ff';
 const TUNNEL_COLOR = '#000';            // dug-out cell below the surface line
 // underground-y (SURFACE_Y-relative, see paintRow) that MAP buffer row 0
 // currently represents; scrollMap() advances this as the buffer gets paged
 let mapOffset = 0;
-// cells dug out so far, keyed by 'x_undergroundY' (both CELL_SIZE-aligned).
+// world-x that MAP buffer column 0 currently represents - the X-axis twin of
+// mapOffset (world-x = bufferX + mapOffsetX). scrollMap() advances it on a
+// horizontal page. Kept CELL_SIZE-aligned (scroll deltas and the reanchor
+// delta are both snapped) so DUG keys line up. The map has no left/right
+// bound - this just tracks where the finite buffer window currently sits.
+let mapOffsetX = 0;
+// cells dug out so far, keyed by 'worldX_undergroundY' (both CELL_SIZE-aligned;
+// worldX can be negative once the drill roams left of its start).
 // Set persists across scrolling so backtracking through a dug shaft doesn't
 // regenerate solid material - see dig()/paintRow().
 const DUG = new Set();
 
 hero = {
-  x: PLAYFIELD_WIDTH / 2 - HERO_W / 2,
+  x: CAMERA_WIDTH - HERO_W / 2,         // buffer centre (buffer is 2x CAMERA_WIDTH); reanchorBuffer() re-seats it on the first resize
   y: SURFACE_Y - HERO_H,                // feet on the ground, not center
   w: HERO_W,
   h: HERO_H,
@@ -127,20 +127,15 @@ depth = 0;
 dust = 0;
 dustPop = -1;
 particles = [];
-// camera-window & edge-snapping settings
-const CAMERA_WINDOW_X = 400;
-const CAMERA_WINDOW_Y = 200;
-const CAMERA_WINDOW_WIDTH = CAMERA_WIDTH - 2*CAMERA_WINDOW_X;
-const CAMERA_WINDOW_HEIGHT = CAMERA_HEIGHT - 2*CAMERA_WINDOW_Y;
 
 const CTX = c.getContext('2d');         // visible canvas
 const BUFFER = c.cloneNode();           // backbuffer
 const BUFFER_CTX = BUFFER.getContext('2d');
-BUFFER.width = PLAYFIELD_WIDTH;         // width == whole playfield (no horizontal paging); height is 2x viewport for vertical scroll lookahead. resizeViewport() re-applies both.
+BUFFER.width = 2 * CAMERA_WIDTH;        // 2x viewport each way: a scroll-lookahead margin the camera pages through (scrollMap). resizeViewport() re-applies both.
 BUFFER.height = 2 * CAMERA_HEIGHT;
 const MAP = c.cloneNode();              // static elements of the map/world cached once
 const MAP_CTX = MAP.getContext('2d');
-MAP.width = PLAYFIELD_WIDTH;            // map size, same as backbuffer
+MAP.width = 2 * CAMERA_WIDTH;           // map buffer size, same as backbuffer
 MAP.height = 2 * CAMERA_HEIGHT;
 // dust-cell shapes only (opaque white on transparent), paged in lockstep
 // with MAP by scrollMap(). Colour is applied per-frame in renderDust() by
@@ -148,7 +143,7 @@ MAP.height = 2 * CAMERA_HEIGHT;
 // wouldn't work, MAP freezes each row's colours as the buffer pages.
 const DUST_MASK = c.cloneNode();
 const DUST_MASK_CTX = DUST_MASK.getContext('2d');
-DUST_MASK.width = PLAYFIELD_WIDTH;
+DUST_MASK.width = 2 * CAMERA_WIDTH;
 DUST_MASK.height = 2 * CAMERA_HEIGHT;
 // per-frame scratch: the camera slice of DUST_MASK, masked against
 // DUST_GRADIENT (source-in), then composited onto BUFFER. Camera-sized, not
@@ -264,10 +259,10 @@ function startGame() {
   // if (isMonetizationEnabled()) { unlockExtraContent() }
   konamiIndex = 0;
   cameraX = cameraY = 0;
-  mapOffset = 0;
+  mapOffset = mapOffsetX = 0;
   DUG.clear();
   hero = {
-    x: PLAYFIELD_WIDTH / 2 - HERO_W / 2,
+    x: CAMERA_WIDTH - HERO_W / 2,    // buffer centre (buffer is 2x CAMERA_WIDTH)
     y: SURFACE_Y - HERO_H,          // feet on the ground, not center
     w: HERO_W,
     h: HERO_H,
@@ -282,7 +277,7 @@ function startGame() {
   dust = 0;
   dustPop = -1;
   particles = [];
-  followCamera();                   // pan the viewport onto the freshly-centred hero (no-op when playfield == viewport)
+  followCamera();                   // seat the viewport on the freshly-centred hero
   renderMap();
   screen = GAME_SCREEN;
 };
@@ -370,42 +365,6 @@ function correctAABBCollision(entity1, entity2, test) {
   // entity1 moving up
   else if (entity1.velY < 0) {
     entity1.y += deltaMinY;
-  }
-};
-
-function constrainToViewport(entity) {
-  if (entity.x < 0) {
-    entity.x = 0;
-  } else if (entity.x > MAP.width - entity.w) {
-    entity.x = MAP.width - entity.w;
-  }
-  if (entity.y < 0) {
-    entity.y = 0;
-  } else if (entity.y > MAP.height - entity.h) {
-    entity.y = MAP.height - entity.h;
-  }
-};
-
-
-function updateCameraWindow() {
-  // TODO try to simplify the formulae below with this variable so it's easier to visualize
-  // const cameraEdgeLeftX = cameraX + CAMERA_WINDOW_X;
-  // const cameraEdgeTopY = cameraY + CAMERA_WINDOW_Y;
-  // const cameraEdgeRightX = cameraEdgeLeftX + CAMERA_WINDOW_WIDTH;
-  // const cameraEdgeBottomY = cameraEdgeTopY + CAMERA_WINDOW_HEIGHT;
-
-  // edge snapping
-  if (0 < cameraX && hero.x < cameraX + CAMERA_WINDOW_X) {
-    cameraX = Math.max(0, hero.x - CAMERA_WINDOW_X);
-  }
-  else if (cameraX + CAMERA_WINDOW_X + CAMERA_WINDOW_WIDTH < MAP.width && hero.x + hero.w > cameraX + CAMERA_WINDOW_X + CAMERA_WINDOW_WIDTH) {
-    cameraX = Math.min(MAP.width - CAMERA_WIDTH, hero.x + hero.w - (CAMERA_WINDOW_X + CAMERA_WINDOW_WIDTH));
-  }
-  if (0 < cameraY && hero.y < cameraY + CAMERA_WINDOW_Y) {
-    cameraY = Math.max(0, hero.y - CAMERA_WINDOW_Y);
-  }
-  else if (cameraY + CAMERA_WINDOW_Y + CAMERA_WINDOW_HEIGHT < MAP.height && hero.y + hero.h > cameraY + CAMERA_WINDOW_Y + CAMERA_WINDOW_HEIGHT) {
-    cameraY = Math.min(MAP.height - CAMERA_HEIGHT, hero.y + hero.h - (CAMERA_WINDOW_Y + CAMERA_WINDOW_HEIGHT));
   }
 };
 
@@ -502,36 +461,27 @@ function processInputs() {
         dy = (isKeyDown('ArrowDown', 'KeyS') ? 1 : 0)
            - (isKeyDown('ArrowUp', 'KeyW') ? 1 : 0);
       }
-      // normalise so a forced edge redirect below mixes with input at a sane
+      // normalise so the forced surface dive below mixes with input at a sane
       // ratio (a long pointer drag would otherwise swamp the injected term);
       // the turn maths only cares about direction, so this is a no-op for the
       // ordinary case.
       const len = Math.hypot(dx, dy);
       if (len) { dx /= len; dy /= len; }
 
-      // the world's hard edges can't be drilled through: cancel any input
-      // component pointing into one, and if the drill is pinned there with
-      // nothing valid left to do, redirect it ALONG the edge - the same eased
-      // turn as a real steering input - rather than letting it grind in place
-      // (momentum bleeds, no progress, drill stuck / creeping).
-      const atLeft  = hero.x <= 0;
-      const atRight = hero.x >= PLAYFIELD_WIDTH - hero.w;
-      if (atRight) dx = Math.min(dx, 0);
-      if (atLeft)  dx = Math.max(dx, 0);
-      // porpoise the drill back under: while the resurface win isn't armed
-      // yet (heroWentDeep), a breach clearing the surface by more than a drill
-      // height forces a full dive on the y input - eased through TURN_SPEED
-      // like a real press, so it arcs back down instead of sailing off into
-      // the drag-free sky. Once heroWentDeep, moveHero's depth<=0 win fires
-      // before this and the breach is a clean surfacing. dx is left alone so
-      // the arc can still be steered sideways.
+      // the surface is a soft ceiling (the only edge the world still has - it's
+      // unbounded left/right/down): while the resurface win isn't armed yet
+      // (heroWentDeep), a breach clearing it by more than a drill height forces
+      // a full dive on the y input - eased through TURN_SPEED like a real
+      // press, so the drill arcs back under instead of sailing off into the
+      // drag-free sky. Once heroWentDeep, moveHero's depth<=0 win fires before
+      // this and the breach is a clean surfacing. dx is left alone so the arc
+      // can still be steered sideways.
       const breach = SURFACE_Y - mapOffset - hero.y - hero.h;   // >0 when the whole drill is above the surface line
       if (!heroWentDeep && breach > hero.h) dy = 1;
-      else if ((atLeft || atRight) && !dx && !dy) dy = hero.velY < 0 ? -1 : 1;
 
       let target;
       if (dx || dy) target = Math.atan2(dy, dx);
-      // nothing held, no edge -> coast on the current heading (momentum game, no neutral)
+      // nothing held -> coast on the current heading (momentum game, no neutral)
       if (target !== undefined) {
         // shortest signed turn to the target, wrapped to [-PI, PI] so a 180
         // press doesn't pick the long way round
@@ -587,8 +537,8 @@ function update() {
 // clay is punishing.
 function currentDrag() {
   const r = hero.w / 2;
-  const ex = hero.x + hero.w / 2 + Math.cos(hero.angle) * (r + CELL_SIZE);
-  const ey = hero.y + hero.h / 2 + Math.sin(hero.angle) * (r + CELL_SIZE) - SURFACE_Y + mapOffset;
+  const ex = hero.x + hero.w / 2 + Math.cos(hero.angle) * (r + CELL_SIZE) + mapOffsetX;          // world-x
+  const ey = hero.y + hero.h / 2 + Math.sin(hero.angle) * (r + CELL_SIZE) - SURFACE_Y + mapOffset; // underground-y
   if (ey < 0) return MOMENTUM.airDrag;
   const key = Math.floor(ex / CELL_SIZE) * CELL_SIZE + '_' + Math.floor(ey / CELL_SIZE) * CELL_SIZE;
   return MOMENTUM.entropy + (DUG.has(key) ? MOMENTUM.tunnelDrag : MATERIAL_DRAG[sampleMaterial(ex, ey)]);
@@ -611,10 +561,8 @@ function moveHero() {
   hero.velY = Math.sin(hero.angle);
   hero.x += hero.velX * hero.momentum * elapsedTime;
   hero.y += hero.velY * hero.momentum * elapsedTime;
-  // clamp to the playfield edges (the viewport pans within them, see
-  // followCamera). processInputs() also peels a wall-pinned drill off along
-  // the edge; this is the hard backstop.
-  hero.x = Math.max(0, Math.min(PLAYFIELD_WIDTH - hero.w, hero.x));
+  // no horizontal clamp - the map is unbounded left/right; followCamera()
+  // pages the buffer under the drill wherever it roams.
   depth = Math.max(0, Math.round(hero.y + hero.h - SURFACE_Y + mapOffset));
 
   if (depth >= MOMENTUM.winMinDepth) heroWentDeep = true;
@@ -640,8 +588,8 @@ function endGame(won) {
 // DESIGN.md: fixed-width tunnel, not variable). An axis-aligned box would've
 // carved a fatter tunnel on diagonals than straight down/up.
 function digShaft() {
-  const cx = hero.x + hero.w / 2;
-  const cy = hero.y + hero.h / 2 - SURFACE_Y + mapOffset;   // underground-space
+  const cx = hero.x + hero.w / 2 + mapOffsetX;              // world-x
+  const cy = hero.y + hero.h / 2 - SURFACE_Y + mapOffset;   // underground-y
   const r = hero.w / 2;
   for (let x = Math.floor((cx - r) / CELL_SIZE) * CELL_SIZE; x < cx + r; x += CELL_SIZE) {
     for (let y = Math.max(0, Math.floor((cy - r) / CELL_SIZE) * CELL_SIZE); y < cy + r; y += CELL_SIZE) {
@@ -650,18 +598,21 @@ function digShaft() {
   }
 }
 
-// mark one CELL_SIZE cell as dug (x, undergroundY both CELL_SIZE-aligned) and
-// punch the hole into the MAP buffer right away. paintRow() also consults
-// DUG so a previously dug cell stays dug after scrolling away and back.
-function dig(x, undergroundY) {
-  const key = x + '_' + undergroundY;
+// mark one CELL_SIZE cell as dug (worldX, undergroundY both CELL_SIZE-aligned,
+// worldX may be negative) and punch the hole into the MAP buffer right away -
+// converting to buffer coords (- mapOffsetX / + SURFACE_Y - mapOffset) for the
+// draw. paintRow()/paintCol() also consult DUG so a previously dug cell stays
+// dug after scrolling away and back.
+function dig(worldX, undergroundY) {
+  const key = worldX + '_' + undergroundY;
   if (!DUG.has(key)) {
     DUG.add(key);
+    const bx = worldX - mapOffsetX, by = undergroundY + SURFACE_Y - mapOffset;
     MAP_CTX.fillStyle = TUNNEL_COLOR;
-    MAP_CTX.fillRect(x, undergroundY + SURFACE_Y - mapOffset, CELL_SIZE, CELL_SIZE);
+    MAP_CTX.fillRect(bx, by, CELL_SIZE, CELL_SIZE);
     // stop this cell shimmering now it's collected; paintRow()'s !dug check
     // keeps it clear when the row pages away and back
-    DUST_MASK_CTX.clearRect(x, undergroundY + SURFACE_Y - mapOffset, CELL_SIZE, CELL_SIZE);
+    DUST_MASK_CTX.clearRect(bx, by, CELL_SIZE, CELL_SIZE);
     // collection = DUG ∩ sampleDust, so a cell counts the first (only) time
     // it's dug. +1 per cell regardless of category - "dense yields more" is
     // already delivered by dense patches being solid vs sparse's ~25% mask.
@@ -669,9 +620,9 @@ function dig(x, undergroundY) {
     // at once, so patch entry gives a jolt). The +1 itself isn't tallied
     // here - spawnDustParticle()'s particle carries it until it lands (or
     // the run ends, see endGame()).
-    const d = sampleDust(x, undergroundY);
+    const d = sampleDust(worldX, undergroundY);
     if (d !== DUST_NONE) {
-      spawnDustParticle(x, undergroundY);
+      spawnDustParticle(worldX, undergroundY);
       if (d === DUST_DENSE) hero.momentum = Math.min(MOMENTUM.overMax, hero.momentum + MOMENTUM.denseBoost);
     }
   }
@@ -693,9 +644,10 @@ function dustColorAt(x, undergroundY) {
 }
 
 // spawn one collection particle for a just-dug dust cell, starting stage 0
-// ("takeoff") at the cell's centre in BUFFER/world space.
-function spawnDustParticle(x, undergroundY) {
-  const cx = x + CELL_SIZE / 2;
+// ("takeoff") at the cell's centre in BUFFER space (worldX -> bufferX via
+// - mapOffsetX, same as dig()).
+function spawnDustParticle(worldX, undergroundY) {
+  const cx = worldX - mapOffsetX + CELL_SIZE / 2;
   const cy = undergroundY + SURFACE_Y - mapOffset + CELL_SIZE / 2;
   // push radially out from the hero (the tunnel's centre) while growing, so
   // the particle clears the freshly-dug (black) tunnel instead of doubling
@@ -713,7 +665,7 @@ function spawnDustParticle(x, undergroundY) {
     t: 0,
     growDuration: PARTICLE_GROW_DURATION + (Math.random() - 0.5) * PARTICLE_DURATION_JITTER,
     flyDuration: PARTICLE_FLY_DURATION + (Math.random() - 0.5) * PARTICLE_DURATION_JITTER,
-    color: dustColorAt(x, undergroundY),
+    color: dustColorAt(worldX, undergroundY),
     counted: false,   // set once its dust point has been tallied, by landing or by endGame() - guards against double-counting when both can happen
   });
 }
@@ -748,31 +700,36 @@ function updateParticles() {
 // but never feeds back into hero's own position. Still a hard lock on both
 // axes - position-locking + lerp-smoothing is a TODO.md item.
 function followCamera() {
-  // pan x within the playfield: centre on the hero, clamp so the viewport
-  // never runs past either playfield edge. Rounded so terrain/dust/hero all
-  // scroll in whole-pixel steps (smoothing is off). When PLAYFIELD_WIDTH ==
-  // CAMERA_WIDTH the clamp range is [0,0] and this is a no-op.
-  cameraX = clamp(Math.round(hero.x + hero.w / 2 - CAMERA_WIDTH / 2), 0, PLAYFIELD_WIDTH - CAMERA_WIDTH);
+  // centre on the hero in buffer space. Once the camera drifts past a buffer
+  // edge, page THAT axis (shift the buffer content, patch the newly exposed
+  // strip, re-seat cameraX/cameraY near the middle) in one jump rather than
+  // paging every frame - the 2x buffer-vs-viewport size each way is the
+  // lookahead margin. The map itself has no bounds; this only moves the finite
+  // buffer window around under the drill.
+  cameraX = hero.x + hero.w / 2 - CAMERA_WIDTH / 2;
   cameraY = hero.y + hero.h / 2 - CAMERA_HEIGHT / 2;
-  // once the camera drifts past the buffer's edge, page the buffer instead
-  // of clamping: shift its content, patch the newly exposed strip, and
-  // re-center in one jump (rather than paging every single frame) using
-  // the existing 2x buffer-vs-camera size as lookahead margin.
+  if (cameraX < 0 || cameraX > MAP.width - CAMERA_WIDTH) {
+    const margin = (MAP.width - CAMERA_WIDTH) / 2;
+    scrollMap(Math.round((cameraX - margin) / CELL_SIZE) * CELL_SIZE, 0);
+  }
   if (cameraY < 0 || cameraY > MAP.height - CAMERA_HEIGHT) {
     const margin = (MAP.height - CAMERA_HEIGHT) / 2;
-    scrollMap(Math.round((cameraY - margin) / CELL_SIZE) * CELL_SIZE);
+    scrollMap(0, Math.round((cameraY - margin) / CELL_SIZE) * CELL_SIZE);
   }
 }
 
-// self-blit the MAP buffer by dy px (+down/-up) and patch only the newly
-// exposed strip, instead of resampling every visible pixel every frame.
-// Keeps hero/camera pointing at the same underground spot they were before.
-function scrollMap(dy) {
-  if (!dy) return;
+// self-blit the MAP + DUST_MASK buffers by (dx, dy) px and patch only the
+// newly exposed strip(s), instead of resampling every visible pixel every
+// frame. Keeps hero/camera pointing at the same world spot they were before.
+// followCamera() only ever passes one axis at a time, but both are handled;
+// with both non-zero the exposed region is an L and its corner is repainted
+// twice (a full-width row strip + a full-height col strip), harmlessly.
+function scrollMap(dx, dy) {
+  if (!dx && !dy) return;
   // 'copy' so the (partly transparent) dust mask overwrites itself cleanly on
   // the self-blit - source-over would leave the old dust showing through the
   // gaps. It also wipes the newly-exposed strip to transparent, which the
-  // paintRow() calls below then restamp.
+  // paintRow()/paintCol() calls below then restamp.
   if (dy > 0) {
     MAP_CTX.drawImage(MAP, 0, dy, MAP.width, MAP.height - dy, 0, 0, MAP.width, MAP.height - dy);
     DUST_MASK_CTX.globalCompositeOperation = 'copy';
@@ -780,7 +737,7 @@ function scrollMap(dy) {
     DUST_MASK_CTX.globalCompositeOperation = 'source-over';
     mapOffset += dy;
     for (let y = MAP.height - dy; y < MAP.height; y += CELL_SIZE) paintRow(y);
-  } else {
+  } else if (dy < 0) {
     MAP_CTX.drawImage(MAP, 0, 0, MAP.width, MAP.height + dy, 0, -dy, MAP.width, MAP.height + dy);
     DUST_MASK_CTX.globalCompositeOperation = 'copy';
     DUST_MASK_CTX.drawImage(DUST_MASK, 0, 0, MAP.width, MAP.height + dy, 0, -dy, MAP.width, MAP.height + dy);
@@ -788,32 +745,47 @@ function scrollMap(dy) {
     mapOffset += dy;
     for (let y = 0; y < -dy; y += CELL_SIZE) paintRow(y);
   }
+  if (dx > 0) {
+    MAP_CTX.drawImage(MAP, dx, 0, MAP.width - dx, MAP.height, 0, 0, MAP.width - dx, MAP.height);
+    DUST_MASK_CTX.globalCompositeOperation = 'copy';
+    DUST_MASK_CTX.drawImage(DUST_MASK, dx, 0, MAP.width - dx, MAP.height, 0, 0, MAP.width - dx, MAP.height);
+    DUST_MASK_CTX.globalCompositeOperation = 'source-over';
+    mapOffsetX += dx;
+    for (let x = MAP.width - dx; x < MAP.width; x += CELL_SIZE) paintCol(x);
+  } else if (dx < 0) {
+    MAP_CTX.drawImage(MAP, 0, 0, MAP.width + dx, MAP.height, -dx, 0, MAP.width + dx, MAP.height);
+    DUST_MASK_CTX.globalCompositeOperation = 'copy';
+    DUST_MASK_CTX.drawImage(DUST_MASK, 0, 0, MAP.width + dx, MAP.height, -dx, 0, MAP.width + dx, MAP.height);
+    DUST_MASK_CTX.globalCompositeOperation = 'source-over';
+    mapOffsetX += dx;
+    for (let x = 0; x < -dx; x += CELL_SIZE) paintCol(x);
+  }
+  hero.x -= dx;
   hero.y -= dy;
+  cameraX -= dx;
   cameraY -= dy;
-  // stage-0 particles are buffer/world-space, same as hero.y - keep them
-  // glued to their dig position through the self-blit jump (stage-1 ones
-  // are already screen-space and need no correction).
-  for (const p of particles) if (p.stage === 0) p.y -= dy;
+  // stage-0 particles are buffer-space, same as hero.x/y - keep them glued to
+  // their dig position through the self-blit jump (stage-1 ones are already
+  // screen-space and need no correction).
+  for (const p of particles) if (p.stage === 0) { p.x -= dx; p.y -= dy; }
 }
 
 // after resizeViewport() reallocates the buffers (rotate / big window resize),
-// the hero's world-y can be anywhere - or entirely off the new, differently
-// sized buffer, which would feed followCamera() a scroll delta larger than the
-// buffer and permanently desync mapOffset. Re-seat the hero at the buffer's
-// vertical centre and absorb the shift into mapOffset so its underground
-// position (hence depth) is unchanged - same bookkeeping as scrollMap(), but
-// the target is picked directly so it's always in range - then repaint.
+// the hero can be anywhere - or entirely off the new, differently sized buffer,
+// which would feed followCamera() a scroll delta larger than the buffer and
+// permanently desync mapOffset/mapOffsetX. Re-seat the hero at the buffer's
+// centre and absorb the shift into mapOffset/mapOffsetX so its world position
+// (hence depth) is unchanged - same bookkeeping as scrollMap(), but the target
+// is picked directly so it's always in range - then repaint. Both deltas are
+// CELL_SIZE-snapped so the DUG key grid still lines up (dig() floors to cells;
+// an unaligned offset would orphan every already-dug cell on the next repaint).
 function reanchorBuffer() {
-  const dy = hero.y - MAP.height / 2;
-  hero.y -= dy;
-  mapOffset += dy;
-  // playfield width may have changed (PLAYFIELD_MIN floor vs a wider window).
-  // Before the run has moved (depth 0, includes the initial load) recentre;
-  // mid-run just clamp into the new bounds so a rotate doesn't teleport the
-  // hero away from its shaft.
-  hero.x = depth ? clamp(hero.x, 0, PLAYFIELD_WIDTH - hero.w) : PLAYFIELD_WIDTH / 2 - hero.w / 2;
-  followCamera();                     // re-seat both camera axes on the new hero position / new clamp bounds
-  for (const p of particles) if (p.stage === 0) p.y -= dy;
+  const dx = Math.round((hero.x - MAP.width  / 2) / CELL_SIZE) * CELL_SIZE;
+  const dy = Math.round((hero.y - MAP.height / 2) / CELL_SIZE) * CELL_SIZE;
+  hero.x -= dx; mapOffsetX += dx;
+  hero.y -= dy; mapOffset  += dy;
+  followCamera();                     // re-seat both camera axes on the new hero position
+  for (const p of particles) if (p.stage === 0) { p.x -= dx; p.y -= dy; }
   renderMap();
 }
 
@@ -835,10 +807,10 @@ function blit() {
 
 // repaint the backbuffer from MAP, but only the camera slice - nothing ever
 // reads BUFFER outside it (blit and renderDust both window to the same rect).
-// The playfield buffer is up to ~3x wider than the viewport on a phone, so a
-// full-buffer copy every frame is mostly wasted fill. +1px on each axis
-// covers blit() sampling BUFFER at a fractional cameraY; drawImage clips the
-// source read at the buffer edge, so the slight overshoot at the far edges is
+// The buffer is 2x the viewport each way on every device, so a full-buffer
+// copy every frame would be ~4x wasted fill. +1px on each axis covers blit()
+// sampling BUFFER at a fractional cameraX/cameraY; drawImage clips the source
+// read at the buffer edge, so the slight overshoot at the far edges is
 // harmless.
 function clearBuffer() {
   const bx = Math.floor(cameraX), by = Math.floor(cameraY);
@@ -882,7 +854,6 @@ function render() {
         const cx = DUST_COUNTER_X + (str.length * HUD_SCALE * (CHARSET_SIZE + 1) - HUD_SCALE) / 2;
         renderText(str, cx, DUST_COUNTER_Y - (s - HUD_SCALE) * CHARSET_SIZE / 2, ALIGN_CENTER, s);
       }
-      // debugCameraWindow();
       // uncomment to debug mobile input handlers
       // renderDebugTouch();
       break;
@@ -921,13 +892,14 @@ function renderDust() {
   DUST_LAYER_CTX.globalCompositeOperation = 'copy';
   DUST_LAYER_CTX.drawImage(DUST_MASK, cx, cy, CAMERA_WIDTH, CAMERA_HEIGHT, 0, 0, CAMERA_WIDTH, CAMERA_HEIGHT);
   // 'source-in': keep the rainbow only where the mask is opaque. The pattern
-  // is offset by the camera's UNDERGROUND origin (mod tile size) so it tracks
-  // the terrain, plus a steady time phase so it also drifts at a constant
-  // rate. Underground y of scratch row 0 is (cy - SURFACE_Y + mapOffset), x
-  // is cx. Phase is floored to whole px - integer offsets keep the pattern
-  // pixel-aligned (smoothing is off), so it scrolls in crisp 1px steps.
+  // is offset by the camera's WORLD origin (mod tile size) so it tracks the
+  // terrain, plus a steady time phase so it also drifts at a constant rate.
+  // Scratch row 0 sits at world x = (cx + mapOffsetX), underground y =
+  // (cy - SURFACE_Y + mapOffset); mapOffsetX/mapOffset are cell-aligned ints
+  // so the mod stays exact. Phase is floored to whole px - integer offsets
+  // keep the pattern pixel-aligned (smoothing is off), crisp 1px scroll steps.
   const phase = Math.floor(gameTime * DUST_SPEED);
-  const tx = -(((cx % DUST_P) + DUST_P) % DUST_P);
+  const tx = -((((cx + mapOffsetX) % DUST_P) + DUST_P) % DUST_P);
   const ty = -((((cy - SURFACE_Y + mapOffset + phase) % DUST_P) + DUST_P) % DUST_P);
   DUST_LAYER_CTX.globalCompositeOperation = 'source-in';
   DUST_LAYER_CTX.fillStyle = DUST_PATTERN;
@@ -976,34 +948,40 @@ function renderEntity(entity, ctx = BUFFER_CTX) {
   );
 };
 
-function debugCameraWindow() {
-  BUFFER_CTX.strokeStyle = '#d00';
-  BUFFER_CTX.lineWidth = 1;
-  BUFFER_CTX.strokeRect(cameraX + CAMERA_WINDOW_X, cameraY + CAMERA_WINDOW_Y, CAMERA_WINDOW_WIDTH, CAMERA_WINDOW_HEIGHT);
-};
-
-// one CELL_SIZE-tall band of the MAP buffer, sky above ground / material
-// below - shared by the initial full paint and scrollMap's incremental one
-function paintRow(y) {
+// paint one CELL_SIZE cell of the MAP buffer (+ its DUST_MASK cell) from the
+// procedural terrain: (x, y) are BUFFER coords, converted to world x =
+// (x + mapOffsetX) / underground y = (y - SURFACE_Y + mapOffset) for the DUG
+// key and the terrain samplers. Sky above ground, dug tunnel, then virgin
+// material - same lookup order as currentDrag(). The caller clears the
+// DUST_MASK strip once (this only *adds* the opaque cell), since dust rides a
+// transparent-backed buffer and would ghost otherwise; DENSE/SPARSE is
+// irrelevant to the render (yield is carried by the fill - dense solid, sparse
+// ~25% dither - colour is one shared cycling hue). DUG cells are skipped so
+// they stop shimmering once collected and stay skipped when paged back in.
+function paintCell(x, y) {
+  const wx = x + mapOffsetX;
   const underground = y - SURFACE_Y + mapOffset;
-  // dust rides its own transparent-backed buffer, so - unlike MAP, which
-  // fills every cell opaquely - this strip must be cleared before restamping,
-  // or scrolled-away dust ghosts back in. sampleDust category (SPARSE/DENSE)
-  // is irrelevant to the render: yield difference is already carried by the
-  // physical fill (dense = solid patch, sparse = ~25% dither), colour is one
-  // shared cycling hue. Collected cells (DUG) are skipped so they stop
-  // shimmering once dug, and stay skipped when this row pages back in.
+  const dug = DUG.has(wx + '_' + underground);
+  MAP_CTX.fillStyle = underground < 0 ? SKY_COLOR : dug ? TUNNEL_COLOR : materialColor(sampleMaterial(wx, underground));
+  MAP_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+  if (underground >= 0 && !dug && sampleDust(wx, underground) !== DUST_NONE) {
+    DUST_MASK_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+  }
+}
+
+// one CELL_SIZE-tall band of the buffer - the initial full paint and a
+// vertical page (scrollMap dy) both build rows this way.
+function paintRow(y) {
   DUST_MASK_CTX.clearRect(0, y, MAP.width, CELL_SIZE);
   DUST_MASK_CTX.fillStyle = '#fff';
-  for (let x = 0; x < MAP.width; x += CELL_SIZE) {
-    const dug = DUG.has(x + '_' + underground);
-    const color = underground < 0 ? SKY_COLOR : dug ? TUNNEL_COLOR : materialColor(sampleMaterial(x, underground));
-    MAP_CTX.fillStyle = color;
-    MAP_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
-    if (underground >= 0 && !dug && sampleDust(x, underground) !== DUST_NONE) {
-      DUST_MASK_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
-    }
-  }
+  for (let x = 0; x < MAP.width; x += CELL_SIZE) paintCell(x, y);
+};
+
+// one CELL_SIZE-wide column - a horizontal page (scrollMap dx) exposes these.
+function paintCol(x) {
+  DUST_MASK_CTX.clearRect(x, 0, CELL_SIZE, MAP.height);
+  DUST_MASK_CTX.fillStyle = '#fff';
+  for (let y = 0; y < MAP.height; y += CELL_SIZE) paintCell(x, y);
 };
 
 function renderMap() {
@@ -1054,21 +1032,20 @@ onload = async (e) => {
 // derive both viewport axes from the live window size at the fixed
 // RENDER_SCALE (so on-screen sizes never change), clamped to [VIEW_MIN,
 // VIEW_MAX] and snapped to CELL_SIZE (whole buffer rows/cols). If either
-// axis moved, reallocate every offscreen buffer - width == PLAYFIELD_WIDTH
-// (max of the playfield floor and the viewport), height == 2x viewport for
-// scroll lookahead - and return true so the caller
-// repaints (resizing a canvas wipes its bitmap and resets its 2D context,
-// hence the smoothing re-disable here). Only acts on a real change - mobile
-// fires resize on every URL-bar show/hide.
+// axis moved, reallocate every offscreen buffer - MAP/BUFFER/DUST_MASK are
+// 2x the viewport each way (scroll-lookahead margin the camera pages through),
+// DUST_LAYER/TEXT viewport-sized - and return true so the caller repaints
+// (resizing a canvas wipes its bitmap and resets its 2D context, hence the
+// smoothing re-disable here). Only acts on a real change - mobile fires resize
+// on every URL-bar show/hide.
 function resizeViewport() {
   const w = clamp(Math.round(innerWidth  / RENDER_SCALE / CELL_SIZE) * CELL_SIZE, VIEW_MIN, VIEW_MAX);
   const h = clamp(Math.round(innerHeight / RENDER_SCALE / CELL_SIZE) * CELL_SIZE, VIEW_MIN, VIEW_MAX);
   if (w === CAMERA_WIDTH && h === CAMERA_HEIGHT) return false;
   CAMERA_WIDTH = w;
   CAMERA_HEIGHT = h;
-  PLAYFIELD_WIDTH = Math.max(PLAYFIELD_MIN, CAMERA_WIDTH);
   for (const buf of [BUFFER, MAP, DUST_MASK]) {
-    buf.width = PLAYFIELD_WIDTH;
+    buf.width = 2 * CAMERA_WIDTH;
     buf.height = 2 * CAMERA_HEIGHT;
   }
   DUST_LAYER.width = CAMERA_WIDTH;
@@ -1092,8 +1069,8 @@ onresize = onrotate = function() {
   CTX.imageSmoothingEnabled = false;   // resizing c above just reset its context
 
   // the offscreen buffers were wiped by the realloc - re-seat the hero in the
-  // new buffer and repaint from mapOffset + DUG (onload does its own initial
-  // renderMap() after this for the no-realloc case)
+  // new buffer and repaint from mapOffset/mapOffsetX + DUG (onload does its own
+  // initial renderMap() after this for the no-realloc case)
   if (buffersChanged) reanchorBuffer();
 
   // fix key events not received on itch.io when game loads in full screen

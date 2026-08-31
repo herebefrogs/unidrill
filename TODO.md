@@ -16,27 +16,30 @@ for the reasoning behind each of these; this is just the sequencing.
       backtracking doesn't lose dug-location history.
 - [x] Start tracking player velocity and angle: switch to real controls
       (left/right banks the drill left/right, applied to angle).
-- [x] Handle colliding with the vertical edges of the map. `hero.x` is
-      hard-clamped to `PLAYFIELD_WIDTH` in `moveHero()` (the camera pans
-      across the playfield, see the panning item below); on top of
-      that `processInputs()` drops the into-wall input component and, if
-      nothing steerable is left, redirects along the wall (full up if the
-      heading was above horizontal, else full down) through the normal
-      `TURN_SPEED` ease — so a drill pinned on an edge peels off instead of
-      grinding in place. Same mechanism gives the surface a soft ceiling:
-      before `heroWentDeep`, breaching >1 drill-height forces a full dive so
-      the drill porpoises back under rather than flying into the sky.
-- [x] Horizontal camera panning. `PLAYFIELD_WIDTH = max(PLAYFIELD_MIN 1280,
-      CAMERA_WIDTH)` is the device-independent playfield; `hero.x` clamps to
-      it, `followCamera()` pans `cameraX` to keep the drill centred (clamped
-      to the playfield edges, rounded to whole px). When the window is wider
-      than `PLAYFIELD_MIN` (desktop) playfield == viewport and the camera
-      never pans — byte-identical to before. No horizontal buffer paging: the
-      whole playfield lives in `MAP`/`BUFFER`/`DUST_MASK` at once (that's the
-      memory bound on `PLAYFIELD_MIN`). `clearBuffer()` copies only the
-      camera slice to the backbuffer per frame, not the full width. The old
-      `updateCameraWindow()` / `CAMERA_WINDOW_*` are still dead + stale — see
-      the "horizontally unbounded map" item in Later/revisit.
+- [x] Handle the world edges. The map is unbounded left/right/down (see the
+      "horizontally unbounded map" item below) — there are no vertical walls.
+      The only edge is the surface, and it's soft: before `heroWentDeep`,
+      `processInputs()` forces a full dive on the y input when the drill
+      breaches >1 drill-height, eased through `TURN_SPEED`, so it porpoises
+      back under rather than flying into the sky.
+- [x] Horizontal camera panning → superseded by the unbounded map below.
+      The intermediate step was a fixed-width `PLAYFIELD_WIDTH` the camera
+      panned across with `hero.x` clamped to it; that (and `PLAYFIELD_MIN`,
+      the dead `updateCameraWindow()` / `CAMERA_WINDOW_*`) is all gone now.
+- [x] Horizontally unbounded map. The X axis got everything the Y axis had:
+      `mapOffsetX` (world-x of buffer col 0, X-twin of `mapOffset`), a `dx`
+      branch in `scrollMap()` + a `paintCol()` (both `paintRow`/`paintCol`
+      now build strips from a shared `paintCell()`), buffers back to 2×
+      viewport each way, `cameraX`/`hero.x` unbounded buffer coords that jump
+      on an X page (mirror model — `mapOffsetX` never touches the render read
+      path, only sampling/key sites). `followCamera()` pages either axis when
+      the camera drifts past a buffer edge; no `hero.x` clamp anywhere.
+      `DUG` keys, `sampleMaterial`/`sampleDust`, `dustColorAt`, `currentDrag`
+      and `renderDust`'s pattern anchor all take world-x = `bufferX +
+      mapOffsetX` (terrain.js was already `Math.floor`-clean for negative x).
+      `reanchorBuffer()` now cell-snaps its re-seat delta on BOTH axes (the
+      Y-only version left `mapOffset` fractional → dug rows repainted solid
+      after a page; latent bug, fixed here).
 - [x] Momentum / entropy / material drag. Fixed launch impulse
       (`MOMENTUM` config in game.js), decays each frame by entropy + drag
       from the material at the drill's leading edge (`MATERIAL_DRAG` in
@@ -93,8 +96,13 @@ for the reasoning behind each of these; this is just the sequencing.
       now wins, the run just ends, see "Won't do: bingo-fuel warning"). Three
       parts:
       1. Score. `score = fn(dust, depth)` — form TBD (both terms reward,
-         weight against playtests). Update DESIGN.md "Run end / score" when
-         this lands.
+         weight against playtests). Now that the map is horizontally
+         unbounded, decide here whether a term rewards horizontal reach /
+         tunnel path-length too, or whether that would let a degenerate
+         shallow sideways drill sidestep the vertical push-your-luck
+         tension. Path-length would need its own accumulator (like `depth`);
+         neither `hero.x` nor `mapOffsetX` is it. Update DESIGN.md "Run end
+         / score" when this lands.
       2. Rainbow in the sky. Camera fast-scrolls up to the surface; a rainbow
          grows out of the tunnel mouth into the sky, its width proportional
          to `score`.
@@ -170,10 +178,10 @@ for the reasoning behind each of these; this is just the sequencing.
       font isn't crowding the play area on the smallest target viewport
       (portrait mobile especially). `PX_PER_M`, `HUD_SCALE`, `DUST_POP_DURATION`
       are the knobs. Layout constraint (see the `RENDER_SCALE` comment in
-      game.js): the widest HUD string must fit in `CAMERA_WIDTH` (the
-      viewport, not the playfield), and at `RENDER_SCALE = 1` a ~393px phone
-      leaves essentially zero margin — bump `RENDER_SCALE` only with a
-      matching `HUD_SCALE` drop, checked on the narrowest target.
+      game.js): the widest HUD string must fit in `CAMERA_WIDTH`, and at
+      `RENDER_SCALE = 1` a ~393px phone leaves essentially zero margin —
+      bump `RENDER_SCALE` only with a matching `HUD_SCALE` drop, checked on
+      the narrowest target.
 
 - [ ] Rainbow dust palette (`DUST_PALETTE` in game.js). The 7 swatches are
       currently held dark/desaturated to kill the blinding yellow-green-cyan
@@ -216,22 +224,6 @@ for the reasoning behind each of these; this is just the sequencing.
       than stopping them dead. See DESIGN.md (materials, and the rock
       deflection open question). Deprioritised — the core loop works without
       a hard obstacle for now.
-- [ ] Horizontally unbounded map. Drop the left/right walls entirely and let
-      the drill roam sideways as far as it likes — momentum decay becomes the
-      only limit. Removes the "meets a wall it didn't see coming" wrinkle on
-      mobile (walls are off-screen most of a run). Real work: the X axis has
-      to grow everything the Y axis already has — `mapOffsetX` + a `dx` branch
-      in `scrollMap()` + a `paintCol()`, buffer width back to ~2x viewport,
-      `cameraX` becomes an unbounded running world coord, `DUG` keys and
-      `paintRow()`/`terrain.js` cell math must switch to `Math.floor` for
-      negative x (CLAUDE.md flags the `| 0` seam), `renderDust()`'s `cx`
-      splits into buffer-x vs world-x for the pattern anchor, stage-0
-      particles shift on an X page too. Supersedes `PLAYFIELD_WIDTH` (goes
-      "infinite" instead of `max(MIN, viewport)`). Open design q: does a
-      degenerate shallow horizontal drill undercut the vertical push-your-
-      luck tension, or does material drag + momentum decay self-balance it?
-      Also fold in / delete the stale `CAMERA_WINDOW_*` consts and the
-      unused `updateCameraWindow()` / `constrainToViewport()` helpers.
 
 ## Ideas — not yet designed
 

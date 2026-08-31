@@ -103,20 +103,12 @@ up whether descending or climbing, no inversion between the legs.
   touch quirk and is deliberately unusual — get the full context from
   Jerome before changing it.
 
-**World edges.** The drill can't cross the map's boundaries; both cases feed
-a corrected target heading through the same `TURN_SPEED` ease, never a hard
+**World edges.** The map is unbounded left, right and down — the drill can
+roam sideways as far as it likes, momentum decay is the only limit on a
+horizontal run. The one edge left is the surface, and it's soft, feeding a
+corrected target heading through the `TURN_SPEED` ease rather than a hard
 stop:
 
-- Left/right walls: the into-wall component of the input is dropped. If
-  that leaves no input at all, the drill is redirected along the wall —
-  full up if it was heading above horizontal, full down otherwise. The
-  walls sit at the edges of a fixed-width **playfield** (`PLAYFIELD_WIDTH`,
-  device-independent) that the camera pans across, so the horizontal room
-  is the same on every device (see Graphics → Viewport). On a phone both
-  walls are usually off-screen — the drill can meet one it didn't see
-  coming; that's the accepted cost of not cramping the field to the
-  narrowest viewport. Making the map horizontally unbounded (drop the walls
-  entirely, momentum decay the only limit) is on the table — see TODO.md.
 - Surface: no hard ceiling. Before the qualifying dive is armed
   (`heroWentDeep`), breaching more than one drill-height above the surface
   forces a full dive on the vertical input, so the drill porpoises back
@@ -145,14 +137,14 @@ offscreen buffer is reallocated to match on resize/rotate. Vertical is the
 tension axis and gets whatever height the window gives; the sky band above
 the surface stays a fixed height, all extra vertical space goes underground.
 
-Horizontally the viewport pans across a fixed **playfield**
-(`PLAYFIELD_WIDTH = max(PLAYFIELD_MIN, viewport)`), so maneuvering room
-doesn't shrink on a phone — the camera follows the drill and clamps at the
-playfield edges. When the window is already wider than `PLAYFIELD_MIN`
-(desktop) the playfield just equals the viewport and the camera never pans.
-No horizontal buffer paging: the whole playfield fits in the `MAP` /
-`BUFFER` / `DUST_MASK` buffers at once, which is why `PLAYFIELD_MIN` is
-memory-bounded (three buffers at `PLAYFIELD_WIDTH × 2·viewport-height).
+The camera follows the drill on both axes with no bounds. `MAP` / `BUFFER` /
+`DUST_MASK` are 2× the viewport each way — a scroll-lookahead margin — and
+the camera pages them (shift the pixels, repaint only the newly exposed
+strip) whenever it drifts past a buffer edge, on X exactly as on Y.
+`mapOffsetX` / `mapOffset` track which world column / underground row buffer
+origin currently sits at; both stay cell-aligned so the dug-cell set still
+lines up after a page. World-x can go negative once the drill heads left of
+its start.
 
 **Dust rainbow.** Dust cells are coloured by sampling a **repeating diagonal
 rainbow** (↘, top-left → bottom-right) — `DUST_PALETTE`, the 7 rainbow hues
@@ -386,29 +378,29 @@ cell's particle arrives at the HUD (or instantly on game-over if it's still
 mid-flight, see Graphics — Collection animation), not at dig time.
 
 - **Delta overlay** (`DUG`): a `Set` of carved cells, string key
-  `x + '_' + undergroundY`, both `CELL_SIZE`-aligned. Coordinates are in
-  **underground space** — measured from `SURFACE_Y` and offset by
-  `mapOffset` (the running total the paging buffer has scrolled), not world
-  space — so a cell keeps its identity after the buffer pages away and back.
+  `worldX + '_' + undergroundY`, both `CELL_SIZE`-aligned. Coordinates are
+  invariant world/underground space — world-x = `bufferX + mapOffsetX`,
+  underground-y = `bufferY - SURFACE_Y + mapOffset` — not buffer space, so a
+  cell keeps its identity after the buffer pages away and back on either
+  axis. `worldX` goes negative once the drill roams left of its start.
   Naturally bounded by how far the unicorn travels before momentum runs out;
   no eviction logic for a jam-length session.
-- **MAP buffer**: an offscreen canvas `PLAYFIELD_WIDTH` wide (the whole
-  playfield — no horizontal paging) and 2× the viewport height (vertical
-  paging lookahead). It is *not* rebuilt from `sampleMaterial()` each frame
-  — it's paged vertically: `scrollMap()` self-blits the existing pixels by
-  the scroll delta, then `paintRow()` repaints only the newly-exposed
-  `CELL_SIZE` strip (sky above `SURFACE_Y`, else `DUG.has(cell)` ? tunnel :
-  material colour). The 2× height is the lookahead margin that lets paging
-  happen in occasional jumps, not every frame. Only the camera slice of the
-  buffer is copied to the backbuffer per frame (`clearBuffer()`), not the
-  whole width.
+- **MAP buffer**: an offscreen canvas 2× the viewport each way (scroll
+  lookahead on both axes). It is *not* rebuilt from `sampleMaterial()` each
+  frame — it's paged: `scrollMap()` self-blits the existing pixels by the
+  scroll delta, then `paintRow()` (dy page) / `paintCol()` (dx page)
+  repaints only the newly-exposed `CELL_SIZE` strip via `paintCell()` (sky
+  above `SURFACE_Y`, else `DUG.has(cell)` ? tunnel : material colour). The
+  2× size is the lookahead margin that lets paging happen in occasional
+  jumps, not every frame. Only the camera slice of the buffer is copied to
+  the backbuffer per frame (`clearBuffer()`), not the whole thing.
   Dust is **not** in this buffer — its colour comes from a drifting rainbow
   sampled per frame, so a baked colour would freeze per row as it pages.
 - **DUST_MASK buffer**: same size and paging as `MAP`, holds only dust-cell
   shapes (opaque white on transparent). `scrollMap()` self-blits it (with
   `'copy'`, so transparent pixels overwrite cleanly) alongside `MAP`;
-  `paintRow()` stamps its strip. Recoloured per frame on the animation layer
-  — never baked.
+  `paintRow()`/`paintCol()` stamp its strip. Recoloured per frame on the
+  animation layer — never baked.
 - Drilling: `digShaft()` stamps a fixed-radius circle of cells each tick;
   `dig()` adds each new cell to `DUG` **and** immediately punches a hole in
   the MAP buffer (and clears the same cell from `DUST_MASK`), so a cell stays

@@ -5,7 +5,7 @@
 
  | File | What's in it |
  |---|---|
- | `src/js/game.js` | **Everything gameplay**: RAF loop, the 3 screens (TITLE/GAME/END), `hero` state + `moveHero()` + momentum/drag + win-lose + the overspeed bleed (`MOMENTUM.max`/`overMax`/`overBleed`), camera follow + horizontal pan (`followCamera`), viewport/playfield sizing (`RENDER_SCALE`/`PLAYFIELD_WIDTH`/`resizeViewport`/`reanchorBuffer`), the `MAP` buffer paging (`scrollMap`/`paintRow`/`clearBuffer`), digging (`digShaft`/`dig`/`DUG`), the dust rainbow layer (`DUST_MASK`/`DUST_GRADIENT`/`DUST_PATTERN`/`renderDust`), dust collection particles (`spawnDustParticle`/`updateParticles`/`renderParticles`), the HUD (`HUD_*`/`PX_PER_M`/`DUST_COUNTER_*`/`DUST_POP_DURATION`/`SPEED_VALUE_*`, drawn inline in `render()` — both the `dust:` and `speed:` values are drawn separately from their labels so only the number does the 2x pop), all rendering, input dispatch (`processInputs`). |
+ | `src/js/game.js` | **Everything gameplay**: RAF loop, the 3 screens (TITLE/GAME/END), `hero` state + `moveHero()` + momentum/drag + win-lose + the overspeed bleed (`MOMENTUM.max`/`overMax`/`overBleed`), camera follow on both axes (`followCamera`), viewport sizing (`RENDER_SCALE`/`resizeViewport`/`reanchorBuffer`), the `MAP` buffer paging in X and Y (`scrollMap`/`paintRow`/`paintCol`/`paintCell`/`clearBuffer`, `mapOffset`/`mapOffsetX`), digging (`digShaft`/`dig`/`DUG`), the dust rainbow layer (`DUST_MASK`/`DUST_GRADIENT`/`DUST_PATTERN`/`renderDust`), dust collection particles (`spawnDustParticle`/`updateParticles`/`renderParticles`), the HUD (`HUD_*`/`PX_PER_M`/`DUST_COUNTER_*`/`DUST_POP_DURATION`/`SPEED_VALUE_*`, drawn inline in `render()` — both the `dust:` and `speed:` values are drawn separately from their labels so only the number does the 2x pop), all rendering, input dispatch (`processInputs`). |
  | `src/js/terrain.js` | Pure procedural terrain: `sampleMaterial(x,y)` (macro sections + rock-blob pass) and `sampleDust(x,y)` → `DUST_NONE`/`SPARSE`/`DENSE` (own microgrid, wobbly patches, quarter-grid dither for sparse). `CELL_SIZE`, materials `SAND`/`CLAY`, `MATERIAL_COLOR`, `MATERIAL_DRAG`. All keyed off the stateless `hash2D` — nothing stored, recomputed on demand. |
  | `src/js/inputs/keyboard.js`, `inputs/pointer.js` | Raw input capture only (see Game engine below). `pointer.js`'s drag-direction logic is deliberately unusual — ask before touching. |
  | `src/js/text.js` | Bitmap text (`renderText`, `CHARSET_SIZE`, `ALIGN_*`). `renderText`'s 5th arg is an integer `scale` (HUD draws at 3). |
@@ -14,39 +14,43 @@
 
  Concepts that bite if you miss them:
 
- - **Two coordinate spaces.** World space (canvas pixels) vs *underground
-   space* (`y - SURFACE_Y + mapOffset`). `DUG` keys and `sampleMaterial`'s
-   `y` are underground-space; `hero.x/y` are world-space.
+ - **Two coordinate spaces, and they diverge on BOTH axes now.** Buffer
+   space (where the hero is drawn, `hero.x/y`, `cameraX/Y`) vs
+   *world/underground space* — world-x = `bufferX + mapOffsetX`,
+   underground-y = `bufferY - SURFACE_Y + mapOffset`. `DUG` keys,
+   `sampleMaterial`/`sampleDust`/`dustColorAt`/`currentDrag` args, and
+   `renderDust`'s pattern anchor are all world/underground space; everything
+   drawn to `BUFFER` is buffer space. `dig()`/`spawnDustParticle()` take a
+   `worldX` and convert back (`- mapOffsetX`) for the draw.
  - **`depth` is the only reliable "how far underground" measure.** Don't
    compare `hero.y` to `SURFACE_Y` — `scrollMap()` mutates `hero.y`,
-   `cameraY` and `mapOffset` together, so world-space `hero.y` drifts while
-   `depth` stays invariant.
- - **The viewport is window-sized; `RENDER_SCALE` is the one size knob;
-   the playfield is a separate fixed width the camera pans across.**
-   `RENDER_SCALE` (screen px per world px) is fixed on every device so
-   sprites/HUD never shrink on a small screen. `resizeViewport()` derives
+   `cameraY` and `mapOffset` together on a Y page (and `hero.x`, `cameraX`,
+   `mapOffsetX` on an X page), so buffer-space `hero.x/y` both drift.
+   `depth` stays invariant; there's no X analog yet (scoring TODO may add a
+   path-length accumulator).
+ - **The map is unbounded on every axis; `RENDER_SCALE` is the one size
+   knob.** `RENDER_SCALE` (screen px per world px) is fixed on every device
+   so sprites/HUD never shrink on a small screen. `resizeViewport()` derives
    `CAMERA_WIDTH`/`CAMERA_HEIGHT` from the live window (`window /
-   RENDER_SCALE`, clamped `VIEW_MIN..VIEW_MAX`, cell-snapped), sets
-   `PLAYFIELD_WIDTH = max(PLAYFIELD_MIN 1280, CAMERA_WIDTH)`, and
+   RENDER_SCALE`, clamped `VIEW_MIN..VIEW_MAX`, cell-snapped) and
    *reallocates every offscreen buffer* — `BUFFER`/`MAP`/`DUST_MASK` are
-   `PLAYFIELD_WIDTH` × 2× viewport-height (the *whole* playfield fits, no
-   horizontal paging — that's the memory bound on `PLAYFIELD_MIN`),
+   `2×CAMERA_WIDTH × 2×CAMERA_HEIGHT` (a scroll-lookahead margin each way),
    `DUST_LAYER`/`TEXT` viewport-sized; `DUST_PATTERN` and `TEXT` are `let`,
-   re-created on resize. `hero.x` clamps to `PLAYFIELD_WIDTH`;
-   `followCamera()` pans `cameraX` (rounded, clamped `[0, PLAYFIELD_WIDTH -
-   CAMERA_WIDTH]`) — a no-op when they're equal (desktop). `cameraX` is
-   already threaded through `blit`/`renderDust`/particles/`screenToWorld`;
-   it was just pinned at 0 before. `clearBuffer()` copies only the camera
-   slice of `MAP`→`BUFFER` each frame (+1px for `blit`'s fractional
-   `cameraY`). Resizing a canvas wipes it and resets its ctx (smoothing
-   re-disabled in `resizeViewport`); `reanchorBuffer()` then re-seats the
-   hero at the new buffer's centre (folding the shift into `mapOffset`,
-   `depth` invariant) + calls `followCamera()`, then repaints — without it
-   a post-realloc scroll delta can exceed the buffer and permanently
-   desync `mapOffset`. `CAMERA_WINDOW_*` consts + `updateCameraWindow()` /
-   `constrainToViewport()` are dead and stale (computed from the 1280/960
-   placeholders at module load) — don't trust or wire them without redoing
-   the math. See TODO.md "horizontally unbounded map" for the next step.
+   re-created on resize. No `hero.x` clamp anywhere. `followCamera()`
+   centres `cameraX`/`cameraY` on the hero (unclamped, fractional) and, when
+   either drifts past a buffer edge, calls `scrollMap(dx, dy)` to page that
+   axis — self-blit the pixels, `mapOffsetX`/`mapOffset += delta`,
+   `paintCol()`/`paintRow()` the newly exposed strip (both go through the
+   shared `paintCell()`), re-seat `hero`/`camera`/stage-0 particles by the
+   delta. `mapOffsetX`/`mapOffset` are kept CELL_SIZE-aligned (scroll deltas
+   and `reanchorBuffer()`'s re-seat delta are all `Math.round(…/CELL)*CELL`)
+   so `DUG` keys line up. `clearBuffer()` copies only the camera slice of
+   `MAP`→`BUFFER` each frame (+1px for `blit`'s fractional camera).
+   `reanchorBuffer()` (after a resize wipes the buffers) re-seats the hero at
+   the new buffer's centre on both axes, folding the shift into
+   `mapOffsetX`/`mapOffset` (world pos, hence `depth`, invariant), then
+   repaints — without it a post-realloc scroll delta can exceed the buffer
+   and permanently desync the offsets.
  - **The HUD reads metric; the sim is all pixels.** `depth` and
    `hero.momentum` are pixels. `PX_PER_M` (32) exists *only* to convert them
    for the on-screen readout (`depth: 12.4m`, `speed: 19m/s`) — never feed it
@@ -67,19 +71,23 @@
    by collapsing the two, and don't lower `initial` below `max` to make
    headroom — a launch speed under the cruising drag rate makes the early
    game brutally hard (playtested, rejected). See DESIGN.md Open questions.
- - **The `MAP` buffer is paged, never rebuilt.** `scrollMap()` self-blits by
-   the scroll delta and `paintRow()` repaints only the newly exposed strip.
+ - **The `MAP` buffer is paged, never rebuilt.** `scrollMap(dx, dy)`
+   self-blits by the scroll delta; `paintRow()` (Y page) / `paintCol()` (X
+   page) repaint only the newly exposed strip. `followCamera()` passes one
+   axis at a time.
  - **`DUST_MASK` is a second paged buffer, in lockstep with `MAP`.** Holds
    dust-cell *shapes* only (opaque white on transparent); `scrollMap()`
    self-blits it too (with `'copy'` — it's transparent-backed, so
-   source-over would ghost), `paintRow()` stamps its strip, `dig()` clears
-   collected cells. `renderDust()` colours it per frame by `source-in`-
-   masking a repeating diagonal rainbow tile (`DUST_PATTERN`) through it,
-   offset by the camera's *underground* origin (`cy - SURFACE_Y + mapOffset`)
-   so the rainbow sticks to the terrain, + a constant time phase. Gotchas:
-   the camera rect must be `Math.floor`'d (dust takes an extra
-   lift→colour→place round-trip `MAP` doesn't, so a fractional offset makes
-   it crawl ±1px vs terrain); and it must be *one* pattern fill, not tiled
+   source-over would ghost), `paintRow()`/`paintCol()` stamp its strip,
+   `dig()` clears collected cells. `renderDust()` colours it per frame by
+   `source-in`-masking a repeating diagonal rainbow tile (`DUST_PATTERN`)
+   through it, offset by the camera's *world/underground* origin
+   (`cx + mapOffsetX`, `cy - SURFACE_Y + mapOffset`) so the rainbow sticks to
+   the terrain, + a constant time phase. Gotchas: the camera rect must be
+   `Math.floor`'d (dust takes an extra lift→colour→place round-trip `MAP`
+   doesn't, so a fractional offset makes it crawl ±1px vs terrain) — and
+   `mapOffsetX`/`mapOffset` being cell-aligned ints keeps `floor(cx) +
+   mapOffsetX` exact; and it must be *one* pattern fill, not tiled
    `drawImage`s — successive `source-in` draws wipe each other.
  - **Two independent RNGs, never crossed.** `terrain.js` `hash2D` is a
    *stateless* pure hash — everything underground (terrain, dust, later
@@ -99,8 +107,9 @@
    wall-clock gap leaking into the phase).
  - **Cell-index math uses `Math.floor`, not `| 0`.** They diverge for
    negative coords (`| 0` truncates toward zero → a double-wide cell and a
-   mirror seam at the origin). Harmless while everything is `x >= 0`; will
-   bite when the map extends left of `x = 0` (horizontal panning).
+   mirror seam at the origin). This is live now — world-x goes negative once
+   the drill roams left of its start. `game.js` and `terrain.js` are all
+   `Math.floor`; keep it that way.
  - **Build:** never run a build yourself — not `npm run build`, not
    `npm run build:js`, not `npm start`. The user keeps `npm start` running
    (a Claude Code task or a separate terminal); it watches `src/js` and
