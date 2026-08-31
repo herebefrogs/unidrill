@@ -5,7 +5,7 @@
 
  | File | What's in it |
  |---|---|
- | `src/js/game.js` | **Everything gameplay**: RAF loop, the 3 screens (TITLE/GAME/END), `hero` state + `moveHero()` + momentum/drag + win-lose, camera follow, the `MAP` buffer paging (`scrollMap`/`paintRow`), digging (`digShaft`/`dig`/`DUG`), the dust rainbow layer (`DUST_MASK`/`DUST_GRADIENT`/`DUST_PATTERN`/`renderDust`), dust collection particles (`spawnDustParticle`/`updateParticles`/`renderParticles`), the HUD (`HUD_*`/`PX_PER_M`/`DUST_COUNTER_*`/`DUST_POP_DURATION`, drawn inline in `render()`), all rendering, input dispatch (`processInputs`). |
+ | `src/js/game.js` | **Everything gameplay**: RAF loop, the 3 screens (TITLE/GAME/END), `hero` state + `moveHero()` + momentum/drag + win-lose + the overspeed bleed (`MOMENTUM.max`/`overMax`/`overBleed`), camera follow, the `MAP` buffer paging (`scrollMap`/`paintRow`), digging (`digShaft`/`dig`/`DUG`), the dust rainbow layer (`DUST_MASK`/`DUST_GRADIENT`/`DUST_PATTERN`/`renderDust`), dust collection particles (`spawnDustParticle`/`updateParticles`/`renderParticles`), the HUD (`HUD_*`/`PX_PER_M`/`DUST_COUNTER_*`/`DUST_POP_DURATION`/`SPEED_VALUE_*`, drawn inline in `render()` — both the `dust:` and `speed:` values are drawn separately from their labels so only the number does the 2x pop), all rendering, input dispatch (`processInputs`). |
  | `src/js/terrain.js` | Pure procedural terrain: `sampleMaterial(x,y)` (macro sections + rock-blob pass) and `sampleDust(x,y)` → `DUST_NONE`/`SPARSE`/`DENSE` (own microgrid, wobbly patches, quarter-grid dither for sparse). `CELL_SIZE`, materials `SAND`/`CLAY`, `MATERIAL_COLOR`, `MATERIAL_DRAG`. All keyed off the stateless `hash2D` — nothing stored, recomputed on demand. |
  | `src/js/inputs/keyboard.js`, `inputs/pointer.js` | Raw input capture only (see Game engine below). `pointer.js`'s drag-direction logic is deliberately unusual — ask before touching. |
  | `src/js/text.js` | Bitmap text (`renderText`, `CHARSET_SIZE`, `ALIGN_*`). `renderText`'s 5th arg is an integer `scale` (HUD draws at 3). |
@@ -27,7 +27,20 @@
    back into gameplay math. HUD lines are left-aligned at `HUD_X` on purpose:
    right/centre-aligned, the labels jump around as the numbers change width.
    The `dust:` value is drawn separately from its label so only the number
-   does the per-tally pop (`DUST_POP_DURATION`).
+   does the per-tally pop (`DUST_POP_DURATION`); the `speed:` value is split
+   the same way, and swells up to 2x scaled by `(momentum - max) /
+   (overMax - max)` while in the overspeed band — no timer, it just tracks
+   the live value.
+ - **Momentum has two caps, and they mean different things.** `MOMENTUM.max`
+   (== `initial` == HUD "full speed") is the *soft* cap — where a dense-dust
+   boost decays back to. `MOMENTUM.overMax` is the *hard* cap on the
+   transient overshoot a boost is allowed (so the kick lands even at top
+   speed). The gap between them is bled off exponentially in `moveHero()`
+   (`MOMENTUM.overBleed`, ~0.25s) *on top of* normal drag — without that
+   extra term `overMax` would just become the new plateau. Don't "simplify"
+   by collapsing the two, and don't lower `initial` below `max` to make
+   headroom — a launch speed under the cruising drag rate makes the early
+   game brutally hard (playtested, rejected). See DESIGN.md Open questions.
  - **The `MAP` buffer is paged, never rebuilt.** `scrollMap()` self-blits by
    the scroll delta and `paintRow()` repaints only the newly exposed strip.
  - **`DUST_MASK` is a second paged buffer, in lockstep with `MAP`.** Holds
