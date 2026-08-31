@@ -59,16 +59,24 @@ momentum:
 Dense dust tops momentum back up (`MOMENTUM.denseBoost` px/sec per dense
 cell dug — `digShaft()` clears several cells per tick, so entering a patch
 gives a jolt), so a deeper dive is winnable when the drilled route threads
-through dense patches. A dive that misses them decays on drag + entropy
-alone, and the only safe line is a shallow pull-up (a full 180° turn takes
-~0.5s at the current turn rate).
+through dense patches. The boost is allowed to punch *past* the soft cap
+`MOMENTUM.max` (up to a hard `MOMENTUM.overMax`) so the kick still lands
+when you enter a patch already at top speed; the excess then bleeds back to
+`max` exponentially (`MOMENTUM.overBleed`, ~0.25s), so it reads as a surge
+that settles rather than a new plateau. A dive that misses the dense
+patches decays on drag + entropy alone, and the only safe line is a shallow
+pull-up (a full 180° turn takes ~0.5s at the current turn rate).
 
 ## Tracked state
 
 Speed, depth, dust collected. The HUD shows them top-left, left-aligned, at
 3x the bitmap font. Speed and depth are converted from the pixel-space sim
 values to metric for display only (`PX_PER_M` = 32 px/m → `speed` in m/s,
-`depth` in m); the sim itself never leaves pixels. The metric scale only
+`depth` in m); the sim itself never leaves pixels. The speed *value* (the
+number only, not the `speed:` label — drawn separately, centred on itself)
+swells up to 2x while momentum is in the overspeed band, scaled by how far
+between `MOMENTUM.max` and `overMax` it sits — so the pop rides a dense
+patch's boost up and its bleed back down, no separate timer. The metric scale only
 reads as meaningful while the surface is on screen — once deep there's no
 reference frame — so it's tuned for that: the drill is ~0.9 m, a dust cell
 ~0.25 m, a straight sand dive bottoms out around 48 m, a there-and-back win
@@ -98,7 +106,9 @@ until playtesters weigh in.
 
 ## Graphics
 
-2D side view, pixel art. Heavy hit-stop and camera shake for impact.
+2D side view, pixel art. Camera shake for impact. (Hit-stop on dense-patch
+entry was prototyped and dropped — a few frozen frames read as jank, not
+juice; the dense-boost surge now carries that beat instead, see Win/lose.)
 
 **Dust rainbow.** Dust cells are coloured by sampling a **repeating diagonal
 rainbow** (↘, top-left → bottom-right) — `DUST_PALETTE`, the 7 rainbow hues
@@ -369,13 +379,16 @@ mid-flight, see Graphics — Collection animation), not at dig time.
   (warning: heavy with animated gifs) for a survey of options.
 - Rock deflection behavior (once rock is added) — bounce angle, momentum
   cost, or both?
-- Dense-dust momentum boost: shipped **per collected cell**
-  (`MOMENTUM.denseBoost`), clamped to `MOMENTUM.max` (currently == launch
-  momentum, so dense dust restores toward launch speed without overcharging
-  past it). `digShaft()` clears several cells per tick so patch entry is a
-  jolt — playtested as acceptable, not a lurch. Open: whether to lift the
-  cap and allow overcharge above launch momentum (would make dense dust an
-  overdrive, not just a top-up).
+- Dense-dust momentum boost: RESOLVED. Shipped **per collected cell**
+  (`MOMENTUM.denseBoost`); `digShaft()` clears several cells per tick so
+  patch entry is a jolt. The cap question landed on **transient
+  overcharge**: the boost clamps to `MOMENTUM.overMax` (> `max` = launch
+  momentum), then `moveHero()` bleeds the excess above `max` back down
+  exponentially (`MOMENTUM.overBleed`) on top of normal drag — so a dense
+  patch is a real overdrive surge that settles in ~0.25s, not a permanent
+  higher cap (which made the game trivially easy in playtests) nor a boost
+  that vanishes into the cap at top speed (which made it imperceptible).
+  Tuned values: `max` 600, `overMax` 800, `overBleed` 12.
 - Depth-bias formula for the generator (see above) — not yet decided.
 - Endless generation is solved for *sequential* depth access (player only
   ever extends from the surface downward); no random-access-to-arbitrary-depth

@@ -43,7 +43,7 @@ for the reasoning behind each of these; this is just the sequencing.
       revisit the per-tick-cap (already noted in DESIGN Open questions) if
       it feels bad. Landing this retires the "no dust boosts implemented
       yet" paragraph in DESIGN.md's Win/lose.
-- [ ] Rainbow dust — visuals. (a) DONE — `DUST_MASK` buffer holds dust-cell
+- [x] Rainbow dust — visuals. (a) DONE — `DUST_MASK` buffer holds dust-cell
       shapes (paged like MAP, stamped by paintRow, cleared by dig);
       `renderDust()` colours the camera slice per frame by `source-in`-
       masking a repeating diagonal rainbow (`DUST_PALETTE`, 7 hues,
@@ -53,9 +53,18 @@ for the reasoning behind each of these; this is just the sequencing.
       tuning is a playtest item below. (b) DONE — collection particles: on
       dig, spawn the cell as a two-stage particle (grow + radial push clear
       of the tunnel, then ease-in flight to the HUD counter); the counter
-      ticks on arrival. See DESIGN.md "Graphics". (c) Hit-stop: freeze the
-      sim for a few frames on dense-patch entry (first dense cell of a
-      tick) — try it, see if the jolt reads as juicier or just laggy.
+      ticks on arrival. See DESIGN.md "Graphics". (c) RESOLVED — dense-patch
+      boost feel. Hit-stop (freeze a few frames on patch entry) and a
+      "spool-up" (visible slowdown then catch-up) were both prototyped and
+      dropped — read as jank, not juice. What shipped: the dense boost may
+      overshoot the soft cap `MOMENTUM.max` up to `MOMENTUM.overMax` (`dig()`
+      clamps there), then an exponential bleed in `moveHero()`
+      (`MOMENTUM.overBleed`, ~0.25s) pulls the excess back to `max` on top
+      of normal drag — a surge that settles, not a new plateau. HUD tie-in:
+      the `speed:` value (number only, split off its label, centred on
+      itself) swells up to 2x scaled by how far into the `max`→`overMax`
+      band momentum sits. Tuned: max 600, overMax 800, overBleed 12. See
+      DESIGN.md Win/lose + Open questions.
       (d) RESOLVED — counter ticks on particle arrival, juicier than dig-
       time. Edge case handled: `endGame()` tallies any still-in-flight
       particles' dust instantly (they keep animating on END_SCREEN, just

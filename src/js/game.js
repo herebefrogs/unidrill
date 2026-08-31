@@ -42,8 +42,10 @@ const TURN_SPEED = 4 * Math.PI;
 // here for backtracking / breaching the surface). Dense-dust boosts will
 // top it back up once dust exists.
 const MOMENTUM = {
-  initial: 620,               // launch impulse
-  max: 620,                   // dense-dust boosts restore toward launch speed, never above - also keeps digShaft's per-frame circle contiguous (a faster drill would skip cells between frames)
+  initial: 600,               // launch impulse
+  max: 600,                   // soft cap: the highest momentum ordinary drilling holds you at, and where an overspeed boost decays back to (see overBleed). HUD "full speed".
+  overMax: 800,               // hard cap on the transient overshoot a dense patch can stack up (~1.33x max) - the kick is felt even when you enter a patch already at `max`. Ceiling stays under the digShaft limit (per-frame step < the drill diameter down to 30fps) so the carved tunnel never gets gaps.
+  overBleed: 12,              // 1/sec: exponential rate the excess ABOVE `max` decays (on top of normal drag). ~0.08s time constant, so a boost surges then settles back to `max` in ~0.25s instead of becoming a new plateau. This is the "extra drag above the cap" that makes the two caps mean different things.
   entropy: 35,                // material-independent decay, always applied underground
   tunnelDrag: 15,             // through an already-carved cell - cheap backtrack, not free
   airDrag: 0,                 // above the surface
@@ -195,6 +197,8 @@ const HUD_ADVANCE = HUD_SCALE * (CHARSET_SIZE + 1);   // px per glyph at HUD_SCA
 const DUST_COUNTER_X = HUD_X + 7 * HUD_ADVANCE;       // where the 'dust:  ' value starts (also the particles' flight target)
 const DUST_COUNTER_Y = CHARSET_SIZE + 2 * HUD_LINE;   // 3rd HUD line (speed, depth, dust)
 const DUST_POP_DURATION = 0.18;                       // seconds: the counter value swells to 2x and back on each tally
+const SPEED_VALUE_X = HUD_X + 7 * HUD_ADVANCE;        // where the 'speed: ' value starts, split off its label so only the number swells in the overtorque pop
+const SPEED_VALUE_Y = CHARSET_SIZE;                   // 1st HUD line
 
 const TEXT = initTextBuffer(c, CAMERA_WIDTH, CAMERA_HEIGHT);  // text buffer
 
@@ -536,6 +540,14 @@ function moveHero() {
   // momentum - no throttle, steering only (see processInputs). Drag comes
   // from whatever the drill's leading edge is cutting through.
   hero.momentum = Math.max(0, hero.momentum - currentDrag() * elapsedTime);
+  // overspeed bleed: a dense patch can boost momentum past `max` (up to
+  // `overMax`) so the kick lands even at top speed; the excess then decays
+  // exponentially back to `max` on top of the drag above - proportional to
+  // the overshoot, so it's quick at first then eases in. Keeps the boost a
+  // transient surge, not a permanent higher cap (see MOMENTUM.overBleed).
+  if (hero.momentum > MOMENTUM.max) {
+    hero.momentum = MOMENTUM.max + (hero.momentum - MOMENTUM.max) * Math.exp(-MOMENTUM.overBleed * elapsedTime);
+  }
   hero.velX = Math.cos(hero.angle);
   hero.velY = Math.sin(hero.angle);
   hero.x += hero.velX * hero.momentum * elapsedTime;
@@ -602,7 +614,7 @@ function dig(x, undergroundY) {
     const d = sampleDust(x, undergroundY);
     if (d !== DUST_NONE) {
       spawnDustParticle(x, undergroundY);
-      if (d === DUST_DENSE) hero.momentum = Math.min(MOMENTUM.max, hero.momentum + MOMENTUM.denseBoost);
+      if (d === DUST_DENSE) hero.momentum = Math.min(MOMENTUM.overMax, hero.momentum + MOMENTUM.denseBoost);
     }
   }
 }
@@ -757,7 +769,16 @@ function render() {
       renderParticles();
       BUFFER_CTX.fillStyle = '#2255ee';
       BUFFER_CTX.fillRect(hero.x, hero.y, hero.w, hero.h);
-      renderText('speed: ' + Math.round(hero.momentum / PX_PER_M) + 'm/s', HUD_X, CHARSET_SIZE, ALIGN_LEFT, HUD_SCALE);
+      renderText('speed:', HUD_X, SPEED_VALUE_Y, ALIGN_LEFT, HUD_SCALE);
+      // value drawn separately so only the number swells (2x and back) while
+      // momentum sits in the overtorque band - scale tracks how far past `max`
+      // it is, so the pop rides the dense-patch boost up and its bleed down.
+      {
+        const str = Math.round(hero.momentum / PX_PER_M) + 'm/s';
+        const s = HUD_SCALE * (1 + clamp((hero.momentum - MOMENTUM.max) / (MOMENTUM.overMax - MOMENTUM.max), 0, 1));
+        const cx = SPEED_VALUE_X + (str.length * HUD_SCALE * (CHARSET_SIZE + 1) - HUD_SCALE) / 2;
+        renderText(str, cx, SPEED_VALUE_Y - (s - HUD_SCALE) * CHARSET_SIZE / 2, ALIGN_CENTER, s);
+      }
       renderText('depth: ' + (depth / PX_PER_M).toFixed(1) + 'm', HUD_X, CHARSET_SIZE + HUD_LINE, ALIGN_LEFT, HUD_SCALE);
       renderText('dust:', HUD_X, DUST_COUNTER_Y, ALIGN_LEFT, HUD_SCALE);
       // the value briefly swells to 2x and back on each tally (see dustPop); grow about the number's own centre so it pops in place
