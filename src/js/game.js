@@ -68,9 +68,15 @@ let speak;
 
 let cameraX = 0;                        // camera/viewport position in map
 let cameraY = 0;
-const CAMERA_WIDTH = 1280;              // camera/viewport size
-const CAMERA_HEIGHT = 960;
-const SURFACE_Y = CAMERA_HEIGHT / 2;    // world y of ground level; hero starts here, underground gen starts below it
+const CAMERA_WIDTH = 1280;              // camera/viewport width - FIXED on every device, so the playfield (hero.x is clamped to it) and the horizontal feel never change with screen size
+// camera/viewport height. Portrait screens get a taller slice - more
+// underground on screen at once; landscape keeps the historical 4:3.
+// resizeViewport() recomputes it from the live window ratio and reallocates
+// every offscreen buffer to match. Buffer *widths* never change.
+const CAMERA_HEIGHT_MIN = 960;          // 4:3 at CAMERA_WIDTH - landscape, identical to the old fixed size
+const CAMERA_HEIGHT_MAX = 2048;         // ceiling: the 2x scroll buffer is then 4096 tall, the safe canvas-dimension cap (iOS Safari). Taller phones keep some letterbox.
+let CAMERA_HEIGHT = CAMERA_HEIGHT_MIN;  // real value set by resizeViewport() before the first paint
+const SURFACE_Y = 360;                  // world y of ground level - a FIXED sky band, deliberately not CAMERA_HEIGHT/2: extra vertical space all goes underground, and hero.y/depth/mapOffset stay valid across a live rotate because this constant never moves
 const SKY_COLOR = '#9fd8ff';
 const TUNNEL_COLOR = '#000';            // dug-out cell below the surface line
 // underground-y (SURFACE_Y-relative, see paintRow) that MAP buffer row 0
@@ -105,20 +111,20 @@ const CAMERA_WINDOW_HEIGHT = CAMERA_HEIGHT - 2*CAMERA_WINDOW_Y;
 const CTX = c.getContext('2d');         // visible canvas
 const BUFFER = c.cloneNode();           // backbuffer
 const BUFFER_CTX = BUFFER.getContext('2d');
-BUFFER.width = 2560;                    // backbuffer size
-BUFFER.height = 1920;
+BUFFER.width = 2 * CAMERA_WIDTH;        // 2x camera each way - scrollMap() uses the slack as paging lookahead. resizeViewport() re-applies the height.
+BUFFER.height = 2 * CAMERA_HEIGHT;
 const MAP = c.cloneNode();              // static elements of the map/world cached once
 const MAP_CTX = MAP.getContext('2d');
-MAP.width = 2560;                       // map size, same as backbuffer
-MAP.height = 1920;
+MAP.width = 2 * CAMERA_WIDTH;           // map size, same as backbuffer
+MAP.height = 2 * CAMERA_HEIGHT;
 // dust-cell shapes only (opaque white on transparent), paged in lockstep
 // with MAP by scrollMap(). Colour is applied per-frame in renderDust() by
 // masking a drifting rainbow through these shapes - baking it into MAP
 // wouldn't work, MAP freezes each row's colours as the buffer pages.
 const DUST_MASK = c.cloneNode();
 const DUST_MASK_CTX = DUST_MASK.getContext('2d');
-DUST_MASK.width = 2560;
-DUST_MASK.height = 1920;
+DUST_MASK.width = 2 * CAMERA_WIDTH;
+DUST_MASK.height = 2 * CAMERA_HEIGHT;
 // per-frame scratch: the camera slice of DUST_MASK, masked against
 // DUST_GRADIENT (source-in), then composited onto BUFFER. Camera-sized, not
 // buffer-sized - only the visible slice is ever coloured.
@@ -165,7 +171,7 @@ DUST_GRADIENT.width = DUST_GRADIENT.height = DUST_P;
     g.fillRect(Math.floor(i * sw), -span, Math.ceil(sw) + 1, 2 * span);  // +1: overlap, kills hairline seams
   }
 }
-const DUST_PATTERN = DUST_LAYER_CTX.createPattern(DUST_GRADIENT, 'repeat');
+let DUST_PATTERN = DUST_LAYER_CTX.createPattern(DUST_GRADIENT, 'repeat');  // re-created in resizeViewport() after DUST_LAYER is resized
 
 // collection animation: a dug dust cell detaches in two stages, and its
 // dust point is only tallied when it lands (see `dust`, updateParticles()) -
@@ -200,7 +206,7 @@ const DUST_POP_DURATION = 0.18;                       // seconds: the counter va
 const SPEED_VALUE_X = HUD_X + 7 * HUD_ADVANCE;        // where the 'speed: ' value starts, split off its label so only the number swells in the overtorque pop
 const SPEED_VALUE_Y = CHARSET_SIZE;                   // 1st HUD line
 
-const TEXT = initTextBuffer(c, CAMERA_WIDTH, CAMERA_HEIGHT);  // text buffer
+let TEXT = initTextBuffer(c, CAMERA_WIDTH, CAMERA_HEIGHT);  // text buffer; re-allocated in resizeViewport() on rotate/resize
 
 
 const ATLAS = {};
@@ -760,6 +766,22 @@ function scrollMap(dy) {
   for (const p of particles) if (p.stage === 0) p.y -= dy;
 }
 
+// after resizeViewport() reallocates the buffers (rotate / big window resize),
+// the hero's world-y can be anywhere - or entirely off the new, differently
+// sized buffer, which would feed followCamera() a scroll delta larger than the
+// buffer and permanently desync mapOffset. Re-seat the hero at the buffer's
+// vertical centre and absorb the shift into mapOffset so its underground
+// position (hence depth) is unchanged - same bookkeeping as scrollMap(), but
+// the target is picked directly so it's always in range - then repaint.
+function reanchorBuffer() {
+  const dy = hero.y - MAP.height / 2;
+  hero.y -= dy;
+  mapOffset += dy;
+  cameraY = hero.y + hero.h / 2 - CAMERA_HEIGHT / 2;
+  for (const p of particles) if (p.stage === 0) p.y -= dy;
+  renderMap();
+}
+
 // RENDER HANDLERS
 
 function blit() {
@@ -984,14 +1006,49 @@ onload = async (e) => {
   toggleLoop(true);
 };
 
-onresize = onrotate = function() {
-  // scale canvas to fit screen while maintaining aspect ratio
-  scaleToFit = Math.min(innerWidth / BUFFER.width, innerHeight / BUFFER.height);
-  c.width = BUFFER.width * scaleToFit;
-  c.height = BUFFER.height * scaleToFit;
+// recompute CAMERA_HEIGHT from the window ratio; if it changed, reallocate
+// every offscreen buffer to match and return true (the caller must repaint -
+// resizing a canvas wipes its bitmap and resets its 2D context, hence the
+// smoothing re-disable here and the renderMap() in onresize). Portrait ->
+// taller camera (more underground on screen at once); landscape (ratio <=
+// 4:3) -> the CAMERA_HEIGHT_MIN floor, i.e. the old fixed slice. Rounded to
+// CELL_SIZE so it's a whole number of buffer rows, and only acted on when it
+// actually moves - mobile fires resize on every URL-bar show/hide.
+function resizeViewport() {
+  const h = clamp(
+    Math.round(CAMERA_WIDTH * innerHeight / innerWidth / CELL_SIZE) * CELL_SIZE,
+    CAMERA_HEIGHT_MIN, CAMERA_HEIGHT_MAX
+  );
+  if (h === CAMERA_HEIGHT) return false;
+  CAMERA_HEIGHT = h;
+  for (const buf of [BUFFER, MAP, DUST_MASK]) {
+    buf.width = 2 * CAMERA_WIDTH;
+    buf.height = 2 * CAMERA_HEIGHT;
+  }
+  DUST_LAYER.width = CAMERA_WIDTH;
+  DUST_LAYER.height = CAMERA_HEIGHT;
+  DUST_PATTERN = DUST_LAYER_CTX.createPattern(DUST_GRADIENT, 'repeat');
+  TEXT = initTextBuffer(c, CAMERA_WIDTH, CAMERA_HEIGHT);
+  MAP_CTX.imageSmoothingEnabled = BUFFER_CTX.imageSmoothingEnabled = DUST_MASK_CTX.imageSmoothingEnabled = DUST_LAYER_CTX.imageSmoothingEnabled = false;
+  return true;
+}
 
-  // disable smoothing on image scaling
-  CTX.imageSmoothingEnabled = MAP_CTX.imageSmoothingEnabled = BUFFER_CTX.imageSmoothingEnabled = DUST_MASK_CTX.imageSmoothingEnabled = DUST_LAYER_CTX.imageSmoothingEnabled = false;
+onresize = onrotate = function() {
+  const buffersChanged = resizeViewport();
+
+  // scale the visible canvas to the CAMERA aspect (buffers are 2x camera; the
+  // old code scaled by BUFFER dims, which only matched while the two ratios
+  // were locked together). The RAF loop's blit() repaints c every frame, so a
+  // bare c resize needs no explicit redraw.
+  const scaleToFit = Math.min(innerWidth / CAMERA_WIDTH, innerHeight / CAMERA_HEIGHT);
+  c.width = CAMERA_WIDTH * scaleToFit;
+  c.height = CAMERA_HEIGHT * scaleToFit;
+  CTX.imageSmoothingEnabled = false;   // resizing c above just reset its context
+
+  // the offscreen buffers were wiped by the realloc - re-seat the hero in the
+  // new buffer and repaint from mapOffset + DUG (onload does its own initial
+  // renderMap() after this for the no-realloc / landscape case)
+  if (buffersChanged) reanchorBuffer();
 
   // fix key events not received on itch.io when game loads in full screen
   window.focus();
