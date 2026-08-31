@@ -92,8 +92,9 @@ for the reasoning behind each of these; this is just the sequencing.
          drills (append as the shaft is carved); the beam walks that list
          back. Camera locks onto the beam's tip instead of the player for the
          duration. Ties into the "drop resurfacing as a win" idea below.
-- [ ] Player sprite. Replace the blue cube with a vector-drawn stylized
-      unicorn: square head, triangle horn/drill, rectangle body + tail, slim
+- [ ] Player sprite. Replace the blue cube with a stylized unicorn drawn at
+      runtime with canvas primitives (rects + paths), not a bitmap sprite:
+      square head, triangle horn/drill, rectangle body + tail, slim
       rectangles for legs. All white except the horn and tail, which are
       purple. Head/body/tail are a loose rag-doll chain (each lags the one
       ahead). Legs wiggle like digging/swimming, wiggle rate proportional to
