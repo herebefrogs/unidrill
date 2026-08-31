@@ -84,7 +84,8 @@ for the reasoning behind each of these; this is just the sequencing.
       now wins, the run just ends, see "Won't do: bingo-fuel warning"). Three
       parts:
       1. Score. `score = fn(dust, depth)` — form TBD (both terms reward,
-         weight against playtests). Update DESIGN.md Win/lose when this lands.
+         weight against playtests). Update DESIGN.md "Run end / score" when
+         this lands.
       2. Rainbow in the sky. Camera fast-scrolls up to the surface; a rainbow
          grows out of the tunnel mouth into the sky, its width proportional
          to `score`.
@@ -94,6 +95,10 @@ for the reasoning behind each of these; this is just the sequencing.
          drills (append as the shaft is carved); the beam walks that list
          back. Camera locks onto the beam's tip instead of the player for the
          duration. Ties into the "drop resurfacing as a win" idea below.
+- [ ] Music and sound effects. SFX for: collecting a dust cell, the dust
+      counter tally-tick, stalling out (momentum hits 0), and sprouting the
+      end-run rainbow. Plus background music. Helpers in src/js/sound.js
+      (and src/js/speech.js) are stubbed — wire them in.
 - [ ] Player sprite. Replace the blue cube with a stylized unicorn drawn at
       runtime with canvas primitives (rects + paths), not a bitmap sprite:
       square head, triangle horn/drill, rectangle body + tail, slim
@@ -126,7 +131,11 @@ for the reasoning behind each of these; this is just the sequencing.
 
 ## Playtest / gameplay balancing
 
-- [ ] Steering model — absolute direction vs. bank. Playtester said the
+- [x] Steering model — absolute direction vs. bank. RESOLVED: playtesters
+      confirmed the D-pad / absolute-heading model beats bank control — that
+      settles the model. Pointer-steering feel is still open (see "Revisit
+      pointer steering" below). Original notes kept for context:
+      Playtester said the
       keyboard bank-the-heading control "didn't feel natural"; they want
       Up/Down/Left/Right (combining to diagonals) that matches the mobile
       "head where you drag" feel. First cut (instant snap to one of 8
@@ -184,7 +193,8 @@ for the reasoning behind each of these; this is just the sequencing.
 - [ ] Revisit pointer steering: direction changes feel abrupt right now,
       because of the unusual pointer-direction logic in src/js/inputs/pointer.js
       (built to work around a smartphone touch quirk - get the full context
-      from Jerome before changing it).
+      from Jerome before changing it). Also add a visual on-screen D-pad for
+      touch (show the control, and the current drag direction).
 - [ ] Add gamepad support. There's prior art in Jerome's old veggie-ninja repo:
       https://github.com/herebefrogs/veggie-ninja/blob/master/src/js/gamepad.js
       (and possibly an older commit in gamejam-boilerplate's own history).
@@ -234,18 +244,6 @@ Half-formed; each needs a design pass before it becomes a build item.
       patch?) before it's worth prototyping. Risk: the game's pleasure is
       carving your own path — anything that demands twitch dodging could
       fight that.
-- [ ] Drop resurfacing as a win condition — dig-only-down. If playtesting
-      shows bingo-fuel warnings aren't enough to make players turn around
-      on their own, cut the "climb back to the surface" win entirely: the
-      run just ends when momentum hits 0, wherever the player is. On
-      end, camera fast-scrolls up the tunnel back to the surface (dust
-      collected along that tunnel "sprouting" the rainbow as it passes) as
-      the outcome reveal, instead of the player having to actually pilot
-      the climb. Turns the game into pure descent — no return-trip
-      management. Needs a design pass: what replaces the win condition,
-      does depth alone become the score, does bingo-fuel still matter as a
-      mechanic if there's nothing to conserve fuel for.
-
 ## Won't do
 
 - Bingo-fuel warning. Was: a HUD alert when the player likely can't climb

@@ -43,29 +43,32 @@ back to the surface with what you've got before you run out of momentum.**
   (dense dust). (A dust-count carry drag was prototyped and rejected — see
   TODO.md "Won't do".)
 
-## Win / lose
+## Run end / score
 
-Evaluated every frame from `depth` (px below the surface) and current
-momentum:
+**No-fail.** There is no lose state. The run ends — and a rainbow always
+sprouts — in either of two ways, and both are scored the same way:
 
-- **Win:** reach the surface (`depth` back to 0) with momentum still to
-  spare, after having drilled at least a minimum depth (so an instant
-  frame-1 pull-up doesn't count). Dust carried scales rainbow size and
-  score.
-- **Lose:** momentum hits exactly zero while still underground ("bingo
-  fuel", shown to the player as "tapped out!") — no rainbow. Running out at
-  or above the surface without a qualifying dive is also a loss.
+- Momentum decays to zero while still underground (the drill stalls out
+  wherever it is), or
+- the drill returns to the surface (`depth` back to 0) with momentum still
+  to spare, after a qualifying dive (drilled at least a minimum depth, so an
+  instant frame-1 pull-up doesn't end the run).
+
+Score is `fn(dust, depth)` — form TBD, both terms reward, weighted against
+playtests. Dust carried also scales the rainbow's size. Resurfacing is not
+required to score; it just ends the run early with whatever momentum is
+left. (This replaces the earlier bingo-fuel lose condition — see TODO.md
+"Won't do: Bingo-fuel warning".)
 
 Dense dust tops momentum back up (`MOMENTUM.denseBoost` px/sec per dense
 cell dug — `digShaft()` clears several cells per tick, so entering a patch
-gives a jolt), so a deeper dive is winnable when the drilled route threads
-through dense patches. The boost is allowed to punch *past* the soft cap
-`MOMENTUM.max` (up to a hard `MOMENTUM.overMax`) so the kick still lands
-when you enter a patch already at top speed; the excess then bleeds back to
-`max` exponentially (`MOMENTUM.overBleed`, ~0.25s), so it reads as a surge
-that settles rather than a new plateau. A dive that misses the dense
-patches decays on drag + entropy alone, and the only safe line is a shallow
-pull-up (a full 180° turn takes ~0.5s at the current turn rate).
+gives a jolt), so a deeper dive stays alive longer when the drilled route
+threads through dense patches. The boost is allowed to punch *past* the
+soft cap `MOMENTUM.max` (up to a hard `MOMENTUM.overMax`) so the kick still
+lands when you enter a patch already at top speed; the excess then bleeds
+back to `max` exponentially (`MOMENTUM.overBleed`, ~0.25s), so it reads as
+a surge that settles rather than a new plateau. A dive that misses the
+dense patches decays on drag + entropy alone.
 
 ## Tracked state
 
@@ -112,22 +115,24 @@ stop:
   a phone than on desktop. Restoring a device-independent playfield needs
   horizontal camera panning (TODO.md) — until then the wider horizontal
   room on desktop is an accepted inconsistency.
-- Surface: no hard ceiling. Before the resurface win is armed
+- Surface: no hard ceiling. Before the qualifying dive is armed
   (`heroWentDeep`), breaching more than one drill-height above the surface
   forces a full dive on the vertical input, so the drill porpoises back
   under instead of coasting off into the drag-free sky (holding Up just
-  skips it along the surface, bleeding momentum, until it goes deep or taps
-  out). Once `heroWentDeep`, reaching the surface wins before this triggers.
+  skips it along the surface, bleeding momentum, until it goes deep or
+  stalls). Once `heroWentDeep`, reaching the surface ends the run before
+  this triggers.
 
-`TURN_SPEED` is still being tuned against playtests (see TODO.md); the
-model itself — absolute heading vs. the old bank — is also provisional
-until playtesters weigh in.
+The steering model — absolute target heading, eased at `TURN_SPEED`, vs.
+the old relative bank — is settled: playtesters confirmed it over bank
+control. `TURN_SPEED` itself is still being tuned against playtests (see
+TODO.md).
 
 ## Graphics
 
 2D side view, pixel art. Camera shake for impact. (Hit-stop on dense-patch
 entry was prototyped and dropped — a few frozen frames read as jank, not
-juice; the dense-boost surge now carries that beat instead, see Win/lose.)
+juice; the dense-boost surge now carries that beat instead, see Run end / score.)
 
 **Viewport.** One fixed knob, `RENDER_SCALE` (screen px per world px), sets
 how big everything renders — dust cell, HUD glyph, drill — and it is the
@@ -174,7 +179,7 @@ switches to **screen space** — the camera re-centers on the hero every
 frame, so a particle still tracked in world space would drift off the
 (screen-fixed) counter instead of flying to it. The counter ticks up when
 the particle lands, not when the cell is dug — juicier, but it means a run
-that ends (bingo fuel or resurfacing) while particles are still mid-flight
+that ends (stall-out or resurfacing) while particles are still mid-flight
 must tally their dust instantly rather than let the score depend on how
 much of the animation had time to finish; those particles keep flying
 visually after the tally, they just don't double-count on arrival. On each
@@ -194,9 +199,11 @@ pulse.
 Stretch goal: anaglyph red/cyan mode — requires background/entity depth-plane
 separation for parallax.
 
-## Music
+## Music & sound
 
-Chiptune, via ZzFXM (already vendored in `src/js/sound.js`).
+Chiptune background music, via ZzFXM (already vendored in `src/js/sound.js`).
+Sound effects on the key beats: collecting a dust cell, the dust-counter
+tally-tick, the drill stalling out, and the end-run rainbow sprouting.
 
 ## Replayability
 
