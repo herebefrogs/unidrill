@@ -66,7 +66,7 @@ let speak;
 
 // RENDER VARIABLES
 
-let cameraX = 0;                        // camera/viewport position in map
+let cameraX = 0;                        // viewport's top-left in playfield space; followCamera() pans it to keep the hero centred, clamped to [0, PLAYFIELD_WIDTH - CAMERA_WIDTH]
 let cameraY = 0;
 // screen pixels per world pixel - the ONE knob for how big everything (dust
 // cells, HUD font, hero) renders. blit() stretches the viewport onto the
@@ -87,11 +87,20 @@ const VIEW_MIN = 256;                   // clamp floor for either viewport axis 
 const VIEW_MAX = 2048;                  // clamp ceiling: the 2x-tall scroll buffer is then 4096, the safe canvas-dimension cap (iOS Safari). 4K-and-up displays pillarbox/letterbox the excess.
 // camera/viewport size in world px. BOTH axes are derived from the live window
 // size in resizeViewport() (= innerW/H / RENDER_SCALE, clamped) and every
-// offscreen buffer is reallocated to match. cameraX stays pinned at 0 - the
-// viewport edge IS the playfield edge (hero.x clamp) and the MAP-buffer edge,
-// so there is no horizontal paging and MAP.width == CAMERA_WIDTH.
+// offscreen buffer is reallocated to match.
 let CAMERA_WIDTH = 1280;                // real values set by resizeViewport() before the first paint
 let CAMERA_HEIGHT = 960;
+// playfield width in world px - the horizontal bounds the hero is clamped to,
+// device-independent so maneuvering room doesn't shrink on a phone. The
+// viewport pans across it (cameraX). max(MIN, viewport) so a desktop whose
+// window is already wider just gets playfield == viewport (cameraX pinned 0,
+// identical to before panning existed). No horizontal buffer paging: the
+// whole playfield lives in the MAP/BUFFER/DUST_MASK buffers at once, so their
+// width is PLAYFIELD_WIDTH. Bumping PLAYFIELD_MIN costs buffer memory
+// linearly (3 buffers * PLAYFIELD_WIDTH * 2*CAMERA_HEIGHT * 4B) - ~26MB at
+// 1280 on a tall phone, so it's the number that gates how wide this can go.
+const PLAYFIELD_MIN = 1280;             // == the old fixed CAMERA_WIDTH, i.e. the horizontal feel before panning
+let PLAYFIELD_WIDTH = PLAYFIELD_MIN;    // real value set by resizeViewport()
 const SURFACE_Y = 360;                  // world y of ground level - a FIXED sky band, deliberately not CAMERA_HEIGHT/2: extra vertical space all goes underground, and hero.y/depth/mapOffset stay valid across a live rotate because this constant never moves
 const SKY_COLOR = '#9fd8ff';
 const TUNNEL_COLOR = '#000';            // dug-out cell below the surface line
@@ -104,7 +113,7 @@ let mapOffset = 0;
 const DUG = new Set();
 
 hero = {
-  x: CAMERA_WIDTH / 2 - HERO_W / 2,
+  x: PLAYFIELD_WIDTH / 2 - HERO_W / 2,
   y: SURFACE_Y - HERO_H,                // feet on the ground, not center
   w: HERO_W,
   h: HERO_H,
@@ -127,11 +136,11 @@ const CAMERA_WINDOW_HEIGHT = CAMERA_HEIGHT - 2*CAMERA_WINDOW_Y;
 const CTX = c.getContext('2d');         // visible canvas
 const BUFFER = c.cloneNode();           // backbuffer
 const BUFFER_CTX = BUFFER.getContext('2d');
-BUFFER.width = CAMERA_WIDTH;            // width == viewport (no horizontal paging); height is 2x for vertical scroll lookahead. resizeViewport() re-applies both.
+BUFFER.width = PLAYFIELD_WIDTH;         // width == whole playfield (no horizontal paging); height is 2x viewport for vertical scroll lookahead. resizeViewport() re-applies both.
 BUFFER.height = 2 * CAMERA_HEIGHT;
 const MAP = c.cloneNode();              // static elements of the map/world cached once
 const MAP_CTX = MAP.getContext('2d');
-MAP.width = CAMERA_WIDTH;               // map size, same as backbuffer
+MAP.width = PLAYFIELD_WIDTH;            // map size, same as backbuffer
 MAP.height = 2 * CAMERA_HEIGHT;
 // dust-cell shapes only (opaque white on transparent), paged in lockstep
 // with MAP by scrollMap(). Colour is applied per-frame in renderDust() by
@@ -139,7 +148,7 @@ MAP.height = 2 * CAMERA_HEIGHT;
 // wouldn't work, MAP freezes each row's colours as the buffer pages.
 const DUST_MASK = c.cloneNode();
 const DUST_MASK_CTX = DUST_MASK.getContext('2d');
-DUST_MASK.width = CAMERA_WIDTH;
+DUST_MASK.width = PLAYFIELD_WIDTH;
 DUST_MASK.height = 2 * CAMERA_HEIGHT;
 // per-frame scratch: the camera slice of DUST_MASK, masked against
 // DUST_GRADIENT (source-in), then composited onto BUFFER. Camera-sized, not
@@ -258,7 +267,7 @@ function startGame() {
   mapOffset = 0;
   DUG.clear();
   hero = {
-    x: CAMERA_WIDTH / 2 - HERO_W / 2,
+    x: PLAYFIELD_WIDTH / 2 - HERO_W / 2,
     y: SURFACE_Y - HERO_H,          // feet on the ground, not center
     w: HERO_W,
     h: HERO_H,
@@ -273,6 +282,7 @@ function startGame() {
   dust = 0;
   dustPop = -1;
   particles = [];
+  followCamera();                   // pan the viewport onto the freshly-centred hero (no-op when playfield == viewport)
   renderMap();
   screen = GAME_SCREEN;
 };
@@ -505,7 +515,7 @@ function processInputs() {
       // turn as a real steering input - rather than letting it grind in place
       // (momentum bleeds, no progress, drill stuck / creeping).
       const atLeft  = hero.x <= 0;
-      const atRight = hero.x >= CAMERA_WIDTH - hero.w;
+      const atRight = hero.x >= PLAYFIELD_WIDTH - hero.w;
       if (atRight) dx = Math.min(dx, 0);
       if (atLeft)  dx = Math.max(dx, 0);
       // porpoise the drill back under: while the resurface win isn't armed
@@ -601,11 +611,10 @@ function moveHero() {
   hero.velY = Math.sin(hero.angle);
   hero.x += hero.velX * hero.momentum * elapsedTime;
   hero.y += hero.velY * hero.momentum * elapsedTime;
-  // temporary: clamp to the (currently x-locked) camera width instead of the
-  // full map width - there's no horizontal camera panning yet, and proper
-  // edge collision is TODO item 6, this just stops the hero drilling off
-  // both sides of the visible viewport.
-  hero.x = Math.max(0, Math.min(CAMERA_WIDTH - hero.w, hero.x));
+  // clamp to the playfield edges (the viewport pans within them, see
+  // followCamera). processInputs() also peels a wall-pinned drill off along
+  // the edge; this is the hard backstop.
+  hero.x = Math.max(0, Math.min(PLAYFIELD_WIDTH - hero.w, hero.x));
   depth = Math.max(0, Math.round(hero.y + hero.h - SURFACE_Y + mapOffset));
 
   if (depth >= MOMENTUM.winMinDepth) heroWentDeep = true;
@@ -735,10 +744,15 @@ function updateParticles() {
   }
 }
 
-// kept as its own step, decoupled from moveHero(): the camera only ever
-// reads hero.y, it never feeds back into hero's own position. This is
-// still a temporary hard lock - smoothing/lookahead is TODO.md's last item.
+// kept as its own step, decoupled from moveHero(): the camera reads hero.x/y
+// but never feeds back into hero's own position. Still a hard lock on both
+// axes - position-locking + lerp-smoothing is a TODO.md item.
 function followCamera() {
+  // pan x within the playfield: centre on the hero, clamp so the viewport
+  // never runs past either playfield edge. Rounded so terrain/dust/hero all
+  // scroll in whole-pixel steps (smoothing is off). When PLAYFIELD_WIDTH ==
+  // CAMERA_WIDTH the clamp range is [0,0] and this is a no-op.
+  cameraX = clamp(Math.round(hero.x + hero.w / 2 - CAMERA_WIDTH / 2), 0, PLAYFIELD_WIDTH - CAMERA_WIDTH);
   cameraY = hero.y + hero.h / 2 - CAMERA_HEIGHT / 2;
   // once the camera drifts past the buffer's edge, page the buffer instead
   // of clamping: shift its content, patch the newly exposed strip, and
@@ -793,11 +807,12 @@ function reanchorBuffer() {
   const dy = hero.y - MAP.height / 2;
   hero.y -= dy;
   mapOffset += dy;
-  // playfield width may have changed. Before the run has moved (depth 0,
-  // includes the initial load) recentre; mid-run just clamp into the new
-  // bounds so a rotate doesn't teleport the hero away from its shaft.
-  hero.x = depth ? clamp(hero.x, 0, CAMERA_WIDTH - hero.w) : CAMERA_WIDTH / 2 - hero.w / 2;
-  cameraY = hero.y + hero.h / 2 - CAMERA_HEIGHT / 2;
+  // playfield width may have changed (PLAYFIELD_MIN floor vs a wider window).
+  // Before the run has moved (depth 0, includes the initial load) recentre;
+  // mid-run just clamp into the new bounds so a rotate doesn't teleport the
+  // hero away from its shaft.
+  hero.x = depth ? clamp(hero.x, 0, PLAYFIELD_WIDTH - hero.w) : PLAYFIELD_WIDTH / 2 - hero.w / 2;
+  followCamera();                     // re-seat both camera axes on the new hero position / new clamp bounds
   for (const p of particles) if (p.stage === 0) p.y -= dy;
   renderMap();
 }
@@ -808,7 +823,7 @@ function blit() {
   // copy camera portion of the backbuffer onto visible canvas, scaling it to screen dimensions
   CTX.drawImage(
     BUFFER,
-    cameraX, cameraY, CAMERA_WIDTH, CAMERA_HEIGHT,
+    Math.floor(cameraX), cameraY, CAMERA_WIDTH, CAMERA_HEIGHT,
     0, 0, c.width, c.height
   );
   CTX.drawImage(
@@ -818,22 +833,32 @@ function blit() {
   );
 };
 
+// repaint the backbuffer from MAP, but only the camera slice - nothing ever
+// reads BUFFER outside it (blit and renderDust both window to the same rect).
+// The playfield buffer is up to ~3x wider than the viewport on a phone, so a
+// full-buffer copy every frame is mostly wasted fill. +1px on each axis
+// covers blit() sampling BUFFER at a fractional cameraY; drawImage clips the
+// source read at the buffer edge, so the slight overshoot at the far edges is
+// harmless.
+function clearBuffer() {
+  const bx = Math.floor(cameraX), by = Math.floor(cameraY);
+  BUFFER_CTX.drawImage(MAP, bx, by, CAMERA_WIDTH + 1, CAMERA_HEIGHT + 1, bx, by, CAMERA_WIDTH + 1, CAMERA_HEIGHT + 1);
+}
+
 function render() {
   clearTextBuffer();
 
   switch (screen) {
     case TITLE_SCREEN:
-      BUFFER_CTX.drawImage(MAP, 0, 0, BUFFER.width, BUFFER.height);
+      clearBuffer();
       renderText('title screen', CHARSET_SIZE, CHARSET_SIZE);
       renderText(isMobile ? 'tap to start' : 'press any key', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2, ALIGN_CENTER);
       if (konamiIndex === konamiCode.length) {
-        renderText('konami mode on', BUFFER.width - CHARSET_SIZE, CHARSET_SIZE, ALIGN_RIGHT);
+        renderText('konami mode on', CAMERA_WIDTH - CHARSET_SIZE, CHARSET_SIZE, ALIGN_RIGHT);
       }
       break;
     case GAME_SCREEN:
-      // clear backbuffer by drawing static map elements
-      // TODO could also just draw the camera visible portion of the map
-      BUFFER_CTX.drawImage(MAP, 0, 0, BUFFER.width, BUFFER.height);
+      clearBuffer();
       renderDust();
       renderParticles();
       BUFFER_CTX.fillStyle = '#2255ee';
@@ -865,7 +890,7 @@ function render() {
       // keep the map + last hero position on screen (less jarring than a
       // flat wipe, and the player sees where they ran out); just overlay
       // the outcome text.
-      BUFFER_CTX.drawImage(MAP, 0, 0, BUFFER.width, BUFFER.height);
+      clearBuffer();
       renderDust();
       renderParticles();
       BUFFER_CTX.fillStyle = '#2255ee';
@@ -1029,8 +1054,9 @@ onload = async (e) => {
 // derive both viewport axes from the live window size at the fixed
 // RENDER_SCALE (so on-screen sizes never change), clamped to [VIEW_MIN,
 // VIEW_MAX] and snapped to CELL_SIZE (whole buffer rows/cols). If either
-// axis moved, reallocate every offscreen buffer - width == viewport,
-// height == 2x for scroll lookahead - and return true so the caller
+// axis moved, reallocate every offscreen buffer - width == PLAYFIELD_WIDTH
+// (max of the playfield floor and the viewport), height == 2x viewport for
+// scroll lookahead - and return true so the caller
 // repaints (resizing a canvas wipes its bitmap and resets its 2D context,
 // hence the smoothing re-disable here). Only acts on a real change - mobile
 // fires resize on every URL-bar show/hide.
@@ -1040,8 +1066,9 @@ function resizeViewport() {
   if (w === CAMERA_WIDTH && h === CAMERA_HEIGHT) return false;
   CAMERA_WIDTH = w;
   CAMERA_HEIGHT = h;
+  PLAYFIELD_WIDTH = Math.max(PLAYFIELD_MIN, CAMERA_WIDTH);
   for (const buf of [BUFFER, MAP, DUST_MASK]) {
-    buf.width = CAMERA_WIDTH;
+    buf.width = PLAYFIELD_WIDTH;
     buf.height = 2 * CAMERA_HEIGHT;
   }
   DUST_LAYER.width = CAMERA_WIDTH;

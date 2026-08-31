@@ -17,10 +17,8 @@ for the reasoning behind each of these; this is just the sequencing.
 - [x] Start tracking player velocity and angle: switch to real controls
       (left/right banks the drill left/right, applied to angle).
 - [x] Handle colliding with the vertical edges of the map. `hero.x` is
-      hard-clamped to the viewport width in `moveHero()` (no horizontal
-      camera panning yet, so viewport edge == map edge for now — note the
-      viewport width is now device-dependent, see the panning item below);
-      on top of
+      hard-clamped to `PLAYFIELD_WIDTH` in `moveHero()` (the camera pans
+      across the playfield, see the panning item below); on top of
       that `processInputs()` drops the into-wall input component and, if
       nothing steerable is left, redirects along the wall (full up if the
       heading was above horizontal, else full down) through the normal
@@ -28,6 +26,17 @@ for the reasoning behind each of these; this is just the sequencing.
       grinding in place. Same mechanism gives the surface a soft ceiling:
       before `heroWentDeep`, breaching >1 drill-height forces a full dive so
       the drill porpoises back under rather than flying into the sky.
+- [x] Horizontal camera panning. `PLAYFIELD_WIDTH = max(PLAYFIELD_MIN 1280,
+      CAMERA_WIDTH)` is the device-independent playfield; `hero.x` clamps to
+      it, `followCamera()` pans `cameraX` to keep the drill centred (clamped
+      to the playfield edges, rounded to whole px). When the window is wider
+      than `PLAYFIELD_MIN` (desktop) playfield == viewport and the camera
+      never pans — byte-identical to before. No horizontal buffer paging: the
+      whole playfield lives in `MAP`/`BUFFER`/`DUST_MASK` at once (that's the
+      memory bound on `PLAYFIELD_MIN`). `clearBuffer()` copies only the
+      camera slice to the backbuffer per frame, not the full width. The old
+      `updateCameraWindow()` / `CAMERA_WINDOW_*` are still dead + stale — see
+      the "horizontally unbounded map" item in Later/revisit.
 - [x] Momentum / entropy / material drag. Fixed launch impulse
       (`MOMENTUM` config in game.js), decays each frame by entropy + drag
       from the material at the drill's leading edge (`MATERIAL_DRAG` in
@@ -161,11 +170,10 @@ for the reasoning behind each of these; this is just the sequencing.
       font isn't crowding the play area on the smallest target viewport
       (portrait mobile especially). `PX_PER_M`, `HUD_SCALE`, `DUST_POP_DURATION`
       are the knobs. Layout constraint (see the `RENDER_SCALE` comment in
-      game.js): the widest HUD string must fit in `CAMERA_WIDTH`, and at
-      `RENDER_SCALE = 1` a ~393px phone leaves essentially zero margin — bump
-      `RENDER_SCALE` only with a matching `HUD_SCALE` drop, checked on the
-      narrowest target. If Option 2 lands (panning item below), this keys off
-      the viewport width, which stops being the playfield width.
+      game.js): the widest HUD string must fit in `CAMERA_WIDTH` (the
+      viewport, not the playfield), and at `RENDER_SCALE = 1` a ~393px phone
+      leaves essentially zero margin — bump `RENDER_SCALE` only with a
+      matching `HUD_SCALE` drop, checked on the narrowest target.
 
 - [ ] Rainbow dust palette (`DUST_PALETTE` in game.js). The 7 swatches are
       currently held dark/desaturated to kill the blinding yellow-green-cyan
@@ -208,24 +216,22 @@ for the reasoning behind each of these; this is just the sequencing.
       than stopping them dead. See DESIGN.md (materials, and the rock
       deflection open question). Deprioritised — the core loop works without
       a hard obstacle for now.
-- [ ] Horizontal camera panning (a.k.a. "Option 2"). Wanted now, not
-      deprioritised: since `RENDER_SCALE` pins screen-px-per-world-px, the
-      viewport spans `innerWidth / RENDER_SCALE` *world* px, so the playfield
-      (== viewport, `hero.x` clamped to `CAMERA_WIDTH`) is ~392 world px on a
-      phone vs ~1920 on desktop — maneuvering room varies ~5x by device,
-      which cramps the map badly on mobile. Option 2 fixes the playfield
-      width across devices and pans the camera within it.
-      Structurally: a fixed `PLAYFIELD_WIDTH` decoupled from `CAMERA_WIDTH`;
-      `hero.x` clamps to the playfield, not the viewport; `cameraX` follows
-      the hero (`followCamera()` only touches y today; `updateCameraWindow()`
-      has x logic but is never called); MAP/DUST_MASK width goes back above
-      viewport width for paging lookahead and `scrollMap()`/`paintRow()` gain
-      an x axis; edge collision then clamps to the real playfield edge.
-      First: the `CAMERA_WINDOW_*` consts are stale — computed at module load
-      from the 1280/960 placeholders, before `resizeViewport()` overwrites
-      `CAMERA_WIDTH`/`CAMERA_HEIGHT`, and `CAMERA_WINDOW_X = 400` now exceeds
-      a phone's whole viewport width (negative `CAMERA_WINDOW_WIDTH`).
-      Recompute them in `resizeViewport()` or delete and rederive.
+- [ ] Horizontally unbounded map. Drop the left/right walls entirely and let
+      the drill roam sideways as far as it likes — momentum decay becomes the
+      only limit. Removes the "meets a wall it didn't see coming" wrinkle on
+      mobile (walls are off-screen most of a run). Real work: the X axis has
+      to grow everything the Y axis already has — `mapOffsetX` + a `dx` branch
+      in `scrollMap()` + a `paintCol()`, buffer width back to ~2x viewport,
+      `cameraX` becomes an unbounded running world coord, `DUG` keys and
+      `paintRow()`/`terrain.js` cell math must switch to `Math.floor` for
+      negative x (CLAUDE.md flags the `| 0` seam), `renderDust()`'s `cx`
+      splits into buffer-x vs world-x for the pattern anchor, stage-0
+      particles shift on an X page too. Supersedes `PLAYFIELD_WIDTH` (goes
+      "infinite" instead of `max(MIN, viewport)`). Open design q: does a
+      degenerate shallow horizontal drill undercut the vertical push-your-
+      luck tension, or does material drag + momentum decay self-balance it?
+      Also fold in / delete the stale `CAMERA_WINDOW_*` consts and the
+      unused `updateCameraWindow()` / `constrainToViewport()` helpers.
 
 ## Ideas — not yet designed
 
