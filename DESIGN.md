@@ -54,11 +54,18 @@ sprouts — in either of two ways, and both are scored the same way:
   to spare, after a qualifying dive (drilled at least a minimum depth, so an
   instant frame-1 pull-up doesn't end the run).
 
-Score is `fn(dust, depth)` — form TBD, both terms reward, weighted against
-playtests. Dust carried also scales the rainbow's size. Resurfacing is not
-required to score; it just ends the run early with whatever momentum is
-left. (This replaces the earlier bingo-fuel lose condition — see TODO.md
-"Won't do: Bingo-fuel warning".)
+`score = SCORE_PER_DUST·dust + SCORE_PER_M·metres` (currently 10 and 2),
+where *metres* is the length of **virgin shaft carved** this run — `tunnel`,
+a px accumulator advanced in `moveHero()` only while the drill's leading
+edge is cutting undug ground, so re-running an old shaft doesn't pad it.
+Absolute `depth` is no longer scored or shown: both axes drill infinitely,
+so how deep you happen to be reads arbitrary. Both terms reward
+independently; `SCORE_PER_M` sits high enough that a wide sideways drill
+still scores, but dust is the denser reward. Dust carried also scales the
+rainbow's size. Resurfacing is not required to score; it just ends the run
+early with whatever momentum is left. Both end conditions show one neutral
+headline (`well dug!`) — no win/lose split. (This replaces the earlier
+bingo-fuel lose condition — see TODO.md "Won't do: Bingo-fuel warning".)
 
 Dense dust tops momentum back up (`MOMENTUM.denseBoost` px/sec per dense
 cell dug — `digShaft()` clears several cells per tick, so entering a patch
@@ -72,18 +79,24 @@ dense patches decays on drag + entropy alone.
 
 ## Tracked state
 
-Speed, depth, dust collected. The HUD shows them top-left, left-aligned, at
-3x the bitmap font. Speed and depth are converted from the pixel-space sim
-values to metric for display only (`PX_PER_M` = 32 px/m → `speed` in m/s,
-`depth` in m); the sim itself never leaves pixels. The speed *value* (the
-number only, not the `speed:` label — drawn separately, centred on itself)
-swells up to 2x while momentum is in the overspeed band, scaled by how far
-between `MOMENTUM.max` and `overMax` it sits — so the pop rides a dense
-patch's boost up and its bleed back down, no separate timer. The metric scale only
-reads as meaningful while the surface is on screen — once deep there's no
-reference frame — so it's tuned for that: the drill is ~0.9 m, a dust cell
-~0.25 m, a straight sand dive bottoms out around 48 m, a there-and-back win
-around 24 m.
+Speed, shaft length, dust collected (HUD labels `speed:` / `shaft:` /
+`dust:`). The HUD shows them top-left, left-aligned, at 3x the bitmap font.
+Speed and shaft length are converted from the pixel-space sim values to
+metric for display only (`PX_PER_M` = 32 px/m → `speed` in m/s, `shaft` in
+m, no decimal — the accumulator hits four digits routinely); the sim itself
+never leaves pixels. `depth` is still tracked (it gates the resurface end)
+but no longer shown. The speed *value* (the number only, not the `speed:`
+label — drawn separately, centred on itself) swells up to 2x while momentum
+is in the overspeed band, scaled by how far between `MOMENTUM.max` and
+`overMax` it sits — so the pop rides a dense patch's boost up and its bleed
+back down, no separate timer. The metric scale only reads as meaningful
+while the surface is on screen — once deep there's no reference frame — so
+it's tuned for that: the drill is ~0.9 m, a dust cell ~0.25 m, a straight
+sand dive bottoms out around 48 m.
+
+The END screen repeats `shaft:` / `dust:` plus a `score:` line, left-aligned
+on a shared origin with the labels in a fixed-width field so the value
+column lines up.
 
 ## Controls
 
@@ -194,7 +207,7 @@ pulse.
 ```
   MAP layer         baked terrain + carved tunnel (paged buffer)
   animation layer    live dust cells (DUST_MASK shapes, rainbow-masked per frame) + in-flight collection particles
-  HUD layer          speed, depth, dust counter (TEXT buffer)
+  HUD layer          speed, shaft, dust counter (TEXT buffer)
 ```
 
 Stretch goal: anaglyph red/cyan mode — requires background/entity depth-plane

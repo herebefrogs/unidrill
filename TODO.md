@@ -95,14 +95,15 @@ for the reasoning behind each of these; this is just the sequencing.
 - [ ] Sprout a rainbow on run end (momentum runs out OR resurface — both are
       now wins, the run just ends, see "Won't do: bingo-fuel warning"). Three
       parts:
-      1. Score. `score = fn(dust, depth)` — form TBD (both terms reward,
-         weight against playtests). Now that the map is horizontally
-         unbounded, decide here whether a term rewards horizontal reach /
-         tunnel path-length too, or whether that would let a degenerate
-         shallow sideways drill sidestep the vertical push-your-luck
-         tension. Path-length would need its own accumulator (like `depth`);
-         neither `hero.x` nor `mapOffsetX` is it. Update DESIGN.md "Run end
-         / score" when this lands.
+      1. Score. RESOLVED — `score = 10·dust + 2·metres` where *metres* is
+         `tunnel`, a virgin-shaft-carved px accumulator advanced in
+         `moveHero()` only when the drill's leading edge cuts undug ground
+         (re-running an old shaft doesn't pad it). Absolute `depth` dropped
+         as the distance term (both axes infinite → arbitrary) and off the
+         HUD, replaced by `shaft:` = `tunnel` in metres. END screen adds a
+         `score:` line. No win/lose headline split — both ends read
+         `well dug!`. Tuning (`SCORE_PER_DUST`/`SCORE_PER_M`) is playtest
+         bait. See DESIGN.md "Run end / score".
       2. Rainbow in the sky. Camera fast-scrolls up to the surface; a rainbow
          grows out of the tunnel mouth into the sky, its width proportional
          to `score`.
@@ -201,11 +202,17 @@ for the reasoning behind each of these; this is just the sequencing.
       frame once deep), so it's tuned for that. HUD also got a pass: 3x font,
       top-left + left-aligned so labels don't shift, "momentum" relabelled
       "speed", loss text "tapped out!", dust-counter value pops on each tally.
-- [ ] Brainstorm whimsical game names that avoid "unicorn" and "rainbow" —
-      most other entries will lean on those words, want something that
-      stands out. "UniDrill Corp" is just the working title for now.
+- [ ] Pick the game name. Avoid "unicorn" / "rainbow" / "prism" — every
+      other entry will lean on those. Front-runner: **Gusher** (the end-run
+      rainbow erupts out of the tunnel mouth like an oil gusher — names the
+      single most distinctive thing on screen, no backstory needed).
+      Runner-up: **Bloomshaft** (bloom + mineshaft). Also considered:
+      "Colours Shall Rise", "Bloomwright", "Arcus", "Seven Below". "UniDrill
+      Corp" is the throwaway working title.
 - [ ] Create the title screen (currently skipped: boots straight into
-      GAME_SCREEN, see game.js).
+      GAME_SCREEN, see game.js). Also: replace the end-screen loss text
+      "tapped out!" with "Well Drilled!" (no fail state any more — see
+      "Run end / score").
 - [ ] Revisit pointer steering: direction changes feel abrupt right now,
       because of the unusual pointer-direction logic in src/js/inputs/pointer.js
       (built to work around a smartphone touch quirk - get the full context
@@ -249,8 +256,9 @@ Half-formed; each needs a design pass before it becomes a build item.
   warn when that drops below `depth`). Dropped with the objective change —
   the player now wins whether they resurface or not (the run just ends when
   momentum hits 0, wherever they are, and a rainbow sprouts back up the
-  tunnel). There's no failed-return-trip to warn about any more; depth
-  reached just feeds the score. See "Sprout a rainbow on run end".
+  tunnel). There's no failed-return-trip to warn about any more; shaft
+  length carved feeds the score, not depth. See "Sprout a rainbow on run
+  end".
 
 - Rainbow dust — carry penalty. DESIGN.md's old core-loop line said
   "carrying more dust drains momentum faster"; the idea was to scale

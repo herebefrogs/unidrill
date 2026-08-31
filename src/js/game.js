@@ -55,12 +55,14 @@ const MOMENTUM = {
 
 let hero;
 let heroWentDeep;                              // armed once depth passes MOMENTUM.winMinDepth; gates the resurface win
-let outcome;                                   // true = win (rainbow), false = lose (bingo fuel); read on END_SCREEN
+let outcome;                                   // true = resurfaced with momentum to spare, false = momentum ran out underground; not surfaced to the player yet (END_SCREEN shows one neutral headline), kept for future share/highscore text
 let endReady;                                  // END_SCREEN: true once all inputs held at game-over have been released
-let depth;                                     // px drilled below the surface (world-space y, until infinite scroll lands)
+let depth;                                     // px below the surface right now (world-space y). Still drives heroWentDeep + the resurface end - just no longer the score or a HUD line (both axes drill infinitely, so absolute depth reads arbitrary); see tunnel.
+let tunnel;                                     // px of virgin ground carved this run - accumulated in moveHero() while the drill's leading edge is cutting undug material (re-drilling an old shaft doesn't add). The scored "how far did you drill" measure; HUD "shaft".
 let dust;                                       // rainbow-dust cells collected this run (= DUG ∩ sampleDust), tallied when its particle lands on the counter (or instantly if the run ends first, see endGame()).
 let dustPop;                                     // gameTime of the last dust tally; drives the HUD counter's pop-and-shrink (see DUST_POP_DURATION)
 let particles;                                  // in-flight collection particles (screen-space); each carries the one dust point it's still owed until it lands or endGame() tallies it early
+let score;                                       // final run score, computed once in endGame() (after the early dust tally) = SCORE_PER_DUST*dust + metres of tunnel; shown on END_SCREEN
 
 let speak;
 
@@ -80,12 +82,14 @@ let cameraY = 0;
 // so a phone genuinely sees fewer world px than a desktop - the map is
 // unbounded both ways so nothing is walled off, you just see less of it at
 // once. Larger value = chunkier sprites, less world on screen.
-//   COUPLED WITH HUD_SCALE: the widest HUD string ("tapped out!" at
-//   HUD_SCALE+1, ~392 world px centred; "depth: 123.4m" ~356 left-aligned)
-//   must fit in CAMERA_WIDTH. At RENDER_SCALE 1 a ~393px phone gives ~392
-//   world px - no margin. Raising RENDER_SCALE shrinks CAMERA_WIDTH, so bump
-//   it only together with a matching drop in HUD_SCALE, checked on the
-//   narrowest target.
+//   COUPLED WITH HUD_SCALE: the widest HUD string must fit in CAMERA_WIDTH.
+//   Current worst cases: "well dug!" at HUD_SCALE+1 (9 chars, ~320 world px
+//   centred), "press any key" / "score: 99999" at HUD_SCALE (13 chars,
+//   ~356 centred). At RENDER_SCALE 1 a ~393px phone gives ~392 world px -
+//   little margin. Raising RENDER_SCALE shrinks CAMERA_WIDTH, so bump it only
+//   together with a matching drop in HUD_SCALE, checked on the narrowest
+//   target. (The old "tapped out!" headline at 11 chars/HUD_SCALE+1 was the
+//   binding constraint; "well drilled!" at 13 would have overflowed it.)
 const RENDER_SCALE = 1;
 const VIEW_MIN = 256;                   // clamp floor for either viewport axis - only guards absurdly small windows; a clamped axis means letterbox (see resizeViewport), so keep it below every real device
 const VIEW_MAX = 2048;                  // clamp ceiling on either viewport axis: the 2x scroll buffer is then 4096, the safe canvas-dimension cap (iOS Safari). 4K-and-up displays pillarbox/letterbox the excess.
@@ -111,6 +115,10 @@ let mapOffsetX = 0;
 // Set persists across scrolling so backtracking through a dug shaft doesn't
 // regenerate solid material - see dig()/paintRow().
 const DUG = new Set();
+// DUG key for the cell holding a world-x / underground-y point (Math.floor, not
+// | 0 - the two diverge for negative world-x, see CLAUDE.md). dig() takes
+// already-aligned coords so it builds its key directly instead.
+const cellKey = (wx, wy) => Math.floor(wx / CELL_SIZE) * CELL_SIZE + '_' + Math.floor(wy / CELL_SIZE) * CELL_SIZE;
 
 hero = {
   x: CAMERA_WIDTH - HERO_W / 2,         // buffer centre (buffer is 2x CAMERA_WIDTH); reanchorBuffer() re-seats it on the first resize
@@ -124,6 +132,7 @@ hero = {
 };
 heroWentDeep = false;
 depth = 0;
+tunnel = 0;
 dust = 0;
 dustPop = -1;
 particles = [];
@@ -215,13 +224,15 @@ const PARTICLE_PUSH_MARGIN = CELL_SIZE * 3;   // how far stage 0 clears the tunn
 const PARTICLE_GROW_DURATION = 0.25;    // seconds, stage 0: growing in place
 const PARTICLE_FLY_DURATION = 0.6;      // seconds, stage 1: flight to the counter
 const PARTICLE_DURATION_JITTER = 0.2;   // +/- range, staggers arrivals on a multi-cell dig
-const PX_PER_M = 32;                                  // display-only: game logic is all px, the HUD converts to metres (depth) and m/s (speed)
+const PX_PER_M = 32;                                  // display-only: game logic is all px, the HUD converts to metres (tunnel length) and m/s (speed)
+const SCORE_PER_DUST = 10;                            // points per dust cell (see endGame(): score = SCORE_PER_DUST*dust + SCORE_PER_M*metres carved - both terms reward independently)
+const SCORE_PER_M = 2;                                // points per metre of virgin shaft carved
 const HUD_SCALE = 3;                                  // bitmap-font magnification for the in-game HUD lines
 const HUD_LINE = HUD_SCALE * CHARSET_SIZE + 4;        // px between stacked HUD lines
 const HUD_X = CHARSET_SIZE;                           // left-aligned HUD origin (labels stay put as values gain/lose digits)
 const HUD_ADVANCE = HUD_SCALE * (CHARSET_SIZE + 1);   // px per glyph at HUD_SCALE
 const DUST_COUNTER_X = HUD_X + 7 * HUD_ADVANCE;       // where the 'dust:  ' value starts (also the particles' flight target)
-const DUST_COUNTER_Y = CHARSET_SIZE + 2 * HUD_LINE;   // 3rd HUD line (speed, depth, dust)
+const DUST_COUNTER_Y = CHARSET_SIZE + 2 * HUD_LINE;   // 3rd HUD line (speed, shaft, dust)
 const DUST_POP_DURATION = 0.18;                       // seconds: the counter value swells to 2x and back on each tally
 const SPEED_VALUE_X = HUD_X + 7 * HUD_ADVANCE;        // where the 'speed: ' value starts, split off its label so only the number swells in the overtorque pop
 const SPEED_VALUE_Y = CHARSET_SIZE;                   // 1st HUD line
@@ -274,6 +285,7 @@ function startGame() {
   heroWentDeep = false;
   outcome = undefined;
   depth = 0;
+  tunnel = 0;
   dust = 0;
   dustPop = -1;
   particles = [];
@@ -528,20 +540,25 @@ function update() {
   updateParticles();
 };
 
-// deceleration (px/sec^2) the drill currently suffers, sampled at its
-// leading edge (one drill-radius + one cell ahead of centre along the
-// heading - the centre's own cell is dug out most frames, so sampling
-// there would read "tunnel" while cutting virgin ground). Mirrors
-// paintRow()'s lookup order - sky, then already-dug tunnel, then virgin
-// material - so backtracking up your own shaft is cheap but drilling fresh
-// clay is punishing.
-function currentDrag() {
+// the drill's leading edge in world-x / underground-y: one drill-radius + one
+// cell ahead of centre along the heading. Sampled (rather than the centre,
+// whose cell is dug most frames and would read "tunnel" while cutting virgin
+// ground) by currentDrag() and by moveHero()'s tunnel-length accumulator.
+function drillEdge() {
   const r = hero.w / 2;
-  const ex = hero.x + hero.w / 2 + Math.cos(hero.angle) * (r + CELL_SIZE) + mapOffsetX;          // world-x
-  const ey = hero.y + hero.h / 2 + Math.sin(hero.angle) * (r + CELL_SIZE) - SURFACE_Y + mapOffset; // underground-y
+  return [
+    hero.x + hero.w / 2 + Math.cos(hero.angle) * (r + CELL_SIZE) + mapOffsetX,
+    hero.y + hero.h / 2 + Math.sin(hero.angle) * (r + CELL_SIZE) - SURFACE_Y + mapOffset,
+  ];
+}
+
+// deceleration (px/sec^2) the drill currently suffers. Mirrors paintRow()'s
+// lookup order - sky, then already-dug tunnel, then virgin material - so
+// backtracking up your own shaft is cheap but drilling fresh clay is punishing.
+function currentDrag() {
+  const [ex, ey] = drillEdge();
   if (ey < 0) return MOMENTUM.airDrag;
-  const key = Math.floor(ex / CELL_SIZE) * CELL_SIZE + '_' + Math.floor(ey / CELL_SIZE) * CELL_SIZE;
-  return MOMENTUM.entropy + (DUG.has(key) ? MOMENTUM.tunnelDrag : MATERIAL_DRAG[sampleMaterial(ex, ey)]);
+  return MOMENTUM.entropy + (DUG.has(cellKey(ex, ey)) ? MOMENTUM.tunnelDrag : MATERIAL_DRAG[sampleMaterial(ex, ey)]);
 }
 
 function moveHero() {
@@ -559,11 +576,19 @@ function moveHero() {
   }
   hero.velX = Math.cos(hero.angle);
   hero.velY = Math.sin(hero.angle);
-  hero.x += hero.velX * hero.momentum * elapsedTime;
-  hero.y += hero.velY * hero.momentum * elapsedTime;
+  // velX/velY is a unit vector, so the step length is exactly momentum*dt
+  const moved = hero.momentum * elapsedTime;
+  hero.x += hero.velX * moved;
+  hero.y += hero.velY * moved;
   // no horizontal clamp - the map is unbounded left/right; followCamera()
   // pages the buffer under the drill wherever it roams.
   depth = Math.max(0, Math.round(hero.y + hero.h - SURFACE_Y + mapOffset));
+  // tunnel length: count the step only while the leading edge is cutting undug
+  // ground. Re-running an old shaft is drag-cheap and mustn't pad the score;
+  // stays a plain float, only the HUD rounds. (Slight under-count on the frame
+  // you first enter a fresh cell then dig it - negligible over a run.)
+  const [ex, ey] = drillEdge();
+  if (ey >= 0 && !DUG.has(cellKey(ex, ey))) tunnel += moved;
 
   if (depth >= MOMENTUM.winMinDepth) heroWentDeep = true;
   // win: back at the surface with momentum still to spare, after a real dive.
@@ -579,6 +604,10 @@ function endGame(won) {
   // They're left in `particles` (marked counted) so they still finish
   // flying visually on END_SCREEN.
   for (const p of particles) if (!p.counted) { dust++; p.counted = true; }
+  // score: both terms reward independently (see SCORE_PER_DUST). Computed here,
+  // after the early tally, so it doesn't depend on how many particles had
+  // landed. tunnel is px; the metre count is the second term.
+  score = SCORE_PER_DUST * dust + SCORE_PER_M * Math.round(tunnel / PX_PER_M);
   outcome = won;
   endReady = false;
   screen = END_SCREEN;
@@ -845,7 +874,7 @@ function render() {
         const cx = SPEED_VALUE_X + (str.length * HUD_SCALE * (CHARSET_SIZE + 1) - HUD_SCALE) / 2;
         renderText(str, cx, SPEED_VALUE_Y - (s - HUD_SCALE) * CHARSET_SIZE / 2, ALIGN_CENTER, s);
       }
-      renderText('depth: ' + (depth / PX_PER_M).toFixed(1) + 'm', HUD_X, CHARSET_SIZE + HUD_LINE, ALIGN_LEFT, HUD_SCALE);
+      renderText('shaft: ' + Math.round(tunnel / PX_PER_M) + 'm', HUD_X, CHARSET_SIZE + HUD_LINE, ALIGN_LEFT, HUD_SCALE);
       renderText('dust:', HUD_X, DUST_COUNTER_Y, ALIGN_LEFT, HUD_SCALE);
       // the value briefly swells to 2x and back on each tally (see dustPop); grow about the number's own centre so it pops in place
       {
@@ -866,10 +895,19 @@ function render() {
       renderParticles();
       BUFFER_CTX.fillStyle = '#2255ee';
       BUFFER_CTX.fillRect(hero.x, hero.y, hero.w, hero.h);
-      renderText(outcome ? 'rainbow!' : 'tapped out!', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 - 2 * HUD_LINE, ALIGN_CENTER, HUD_SCALE + 1);
-      renderText('depth: ' + (depth / PX_PER_M).toFixed(1) + 'm', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + HUD_LINE, ALIGN_CENTER, HUD_SCALE);
-      renderText('dust: ' + dust, CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + 2 * HUD_LINE, ALIGN_CENTER, HUD_SCALE);
-      if (endReady) renderText(isMobile ? 'tap to retry' : 'press any key', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + 4 * HUD_LINE, ALIGN_CENTER, HUD_SCALE);
+      // one neutral headline - no win/lose split any more (the run just ends,
+      // see endGame()). outcome is still recorded for future share text.
+      renderText('well dug!', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 - 2 * HUD_LINE, ALIGN_CENTER, HUD_SCALE + 1);
+      // metric lines share a left edge (7-char label field), like the in-game
+      // HUD - centre-aligning each line drifts the labels as the values change
+      // width. mx roughly centres the block.
+      {
+        const mx = CAMERA_WIDTH / 2 - 6 * HUD_ADVANCE;
+        renderText('shaft: ' + Math.round(tunnel / PX_PER_M) + 'm', mx, CAMERA_HEIGHT / 2 + HUD_LINE, ALIGN_LEFT, HUD_SCALE);
+        renderText(' dust: ' + dust, mx, CAMERA_HEIGHT / 2 + 2 * HUD_LINE, ALIGN_LEFT, HUD_SCALE);
+        renderText('score: ' + score, mx, CAMERA_HEIGHT / 2 + 3 * HUD_LINE, ALIGN_LEFT, HUD_SCALE);
+      }
+      if (endReady) renderText(isMobile ? 'tap to retry' : 'press any key', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + 5 * HUD_LINE, ALIGN_CENTER, HUD_SCALE);
       // renderText(monetizationEarned(), TEXT.width - CHARSET_SIZE, TEXT.height - 2*CHARSET_SIZE, ALIGN_RIGHT);
       break;
   }
