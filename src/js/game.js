@@ -19,7 +19,8 @@ let konamiIndex = 0;
 
 const TITLE_SCREEN = 0;
 const GAME_SCREEN = 1;
-const END_SCREEN = 2;
+const REWIND_SCREEN = 2;   // run over: camera fast-walks the drilled path back up to the surface (see updateRewind), then -> END_SCREEN
+const END_SCREEN = 3;
 let screen = GAME_SCREEN; // TODO restore TITLE_SCREEN once GAME_SCREEN is further along
 
 // factor by which to reduce both velX and velY when player moving diagonally
@@ -63,6 +64,17 @@ let dust;                                       // rainbow-dust cells collected 
 let dustPop;                                     // gameTime of the last dust tally; drives the HUD counter's pop-and-shrink (see DUST_POP_DURATION)
 let particles;                                  // in-flight collection particles (screen-space); each carries the one dust point it's still owed until it lands or endGame() tallies it early
 let score;                                       // final run score, computed once in endGame() (after the early dust tally) = SCORE_PER_DUST*dust + metres of tunnel; shown on END_SCREEN
+// breadcrumb polyline of the drill's path, flat [wx0, uy0, wx1, uy1, ...] in
+// world-x / underground-y (scroll-invariant, like DUG keys - NOT buffer space).
+// Seeded at the surface-entry point in startGame(), appended in update() once
+// the drill has moved >= TRAIL_STEP from the last point, closed with the exact
+// stop position in endGame(). REWIND_SCREEN walks the camera back down it.
+let trail;
+let rewound;                                     // did this run's end play the camera rewind? true for an underground end, false for a resurface win (already at the surface) or a resize that abandoned it - END_SCREEN only draws the drill sprite when false
+let rewindI;                                     // index of the trail POINT the rewind camera is currently leaving, counting down to 0 (the surface)
+let rewindT;                                     // 0..1 progress from point rewindI toward point rewindI-1
+let rewindSpeed;                                 // px/sec the rewind camera travels along the polyline (derived from total path length / REWIND_DURATION, clamped)
+let rewindSkip;                                   // a press during the rewind sets this - updateRewind() then fast-forwards straight to the surface
 
 let speak;
 
@@ -136,6 +148,7 @@ tunnel = 0;
 dust = 0;
 dustPop = -1;
 particles = [];
+trail = [hero.x + hero.w / 2 + mapOffsetX, hero.y + hero.h / 2 - SURFACE_Y + mapOffset];
 
 const CTX = c.getContext('2d');         // visible canvas
 const BUFFER = c.cloneNode();           // backbuffer
@@ -227,6 +240,8 @@ const PARTICLE_DURATION_JITTER = 0.2;   // +/- range, staggers arrivals on a mul
 const PX_PER_M = 32;                                  // display-only: game logic is all px, the HUD converts to metres (tunnel length) and m/s (speed)
 const SCORE_PER_DUST = 10;                            // points per dust cell (see endGame(): score = SCORE_PER_DUST*dust + SCORE_PER_M*metres carved - both terms reward independently)
 const SCORE_PER_M = 2;                                // points per metre of virgin shaft carved
+const TRAIL_STEP = 4 * CELL_SIZE;                     // min drill travel between recorded breadcrumbs (see `trail`) - coarse is fine, the rewind camera lerps between points at speed
+const REWIND_DURATION = 1.1;                          // seconds the end-of-run camera rewind aims to take, whatever the path length (speed is derived, then clamped)
 const HUD_SCALE = 3;                                  // bitmap-font magnification for the in-game HUD lines
 const HUD_LINE = HUD_SCALE * CHARSET_SIZE + 4;        // px between stacked HUD lines
 const HUD_X = CHARSET_SIZE;                           // left-aligned HUD origin (labels stay put as values gain/lose digits)
@@ -289,6 +304,7 @@ function startGame() {
   dust = 0;
   dustPop = -1;
   particles = [];
+  trail = [hero.x + hero.w / 2 + mapOffsetX, hero.y + hero.h / 2 - SURFACE_Y + mapOffset];
   followCamera();                   // seat the viewport on the freshly-centred hero
   renderMap();
   screen = GAME_SCREEN;
@@ -503,6 +519,13 @@ function processInputs() {
       }
       break;
     }
+    case REWIND_SCREEN:
+      // any press fast-forwards the rewind - updateRewind() (runs right after
+      // this) then jumps to the surface and hands to END_SCREEN this same
+      // frame. A key still held then won't insta-restart: END_SCREEN waits for
+      // release before arming.
+      if (anyKeyDown() || isPointerDown()) rewindSkip = true;
+      break;
     case END_SCREEN:
       if (isKeyUp('KeyT')) {
         // TODO can I share an image of the game?
@@ -533,12 +556,28 @@ function update() {
     if (screen === GAME_SCREEN) {
       digShaft();
       followCamera();
+      recordTrail();
     }
   }
-  // outside the GAME_SCREEN guard: particles in flight when the run ends
-  // still finish flying on END_SCREEN instead of freezing mid-air.
+  if (screen === REWIND_SCREEN) updateRewind();
+  // outside the screen guards: particles in flight when the run ends still
+  // finish flying through the rewind and onto END_SCREEN instead of freezing.
   updateParticles();
 };
+
+// the drill head (hero centre) in world-x / underground-y - the scroll-invariant
+// space DUG keys, the terrain samplers and the trail polyline all live in.
+function drillWorld() {
+  return [hero.x + hero.w / 2 + mapOffsetX, hero.y + hero.h / 2 - SURFACE_Y + mapOffset];
+}
+
+// append the drill head to `trail` once it has moved a full TRAIL_STEP from the
+// last breadcrumb - a coarse polyline of the path for the end-of-run rewind.
+function recordTrail() {
+  const [wx, wy] = drillWorld();
+  const n = trail.length;
+  if (Math.hypot(wx - trail[n - 2], wy - trail[n - 1]) >= TRAIL_STEP) trail.push(wx, wy);
+}
 
 // the drill's leading edge in world-x / underground-y: one drill-radius + one
 // cell ahead of centre along the heading. Sampled (rather than the centre,
@@ -597,7 +636,7 @@ function moveHero() {
   if (hero.momentum <= 0) return endGame(false);
 }
 
-function endGame(won) {
+function endGame(resurfaced) {
   // the run can end (surfacing or bingo fuel) while particles are still
   // mid-flight; tally their dust immediately instead of leaving the score
   // dependent on how much of that cosmetic animation had time to finish.
@@ -608,17 +647,42 @@ function endGame(won) {
   // after the early tally, so it doesn't depend on how many particles had
   // landed. tunnel is px; the metre count is the second term.
   score = SCORE_PER_DUST * dust + SCORE_PER_M * Math.round(tunnel / PX_PER_M);
-  outcome = won;
+  outcome = resurfaced;
   endReady = false;
-  screen = END_SCREEN;
+
+  // close the trail at the exact stop position. The rewind camera walks this
+  // polyline from the last point back to trail[0] (surface).
+  trail.push(...drillWorld());
+  // a resurface win already ends at the surface, camera and all - no rewind,
+  // the rainbow sprouts at the egress point. Every other end is underground:
+  // rewind the camera up the tunnel back to the surface (that walk-back is
+  // what shows off the dig, and later the rainbow beamed up it). Speed is
+  // derived from the true path length (loops and all), so it takes
+  // ~REWIND_DURATION whatever route it drilled.
+  rewound = !resurfaced;
+  if (rewound) {
+    let pathLen = 0;
+    for (let i = 2; i < trail.length; i += 2) {
+      pathLen += Math.hypot(trail[i] - trail[i - 2], trail[i + 1] - trail[i - 1]);
+    }
+    rewindI = trail.length / 2 - 1;
+    rewindT = 0;
+    rewindSkip = false;
+    // aim for REWIND_DURATION, but never crawl, and never jump more than a
+    // half-buffer per frame (30fps worst case) or scrollMap's self-blit maths
+    // would run past the buffer edge.
+    rewindSpeed = clamp(pathLen / REWIND_DURATION, 600, CAMERA_WIDTH * 8);
+    screen = REWIND_SCREEN;
+  } else {
+    screen = END_SCREEN;
+  }
 }
 
 // stamps a fixed-radius circle around the hero's center every frame (per
 // DESIGN.md: fixed-width tunnel, not variable). An axis-aligned box would've
 // carved a fatter tunnel on diagonals than straight down/up.
 function digShaft() {
-  const cx = hero.x + hero.w / 2 + mapOffsetX;              // world-x
-  const cy = hero.y + hero.h / 2 - SURFACE_Y + mapOffset;   // underground-y
+  const [cx, cy] = drillWorld();                            // world-x, underground-y
   const r = hero.w / 2;
   for (let x = Math.floor((cx - r) / CELL_SIZE) * CELL_SIZE; x < cx + r; x += CELL_SIZE) {
     for (let y = Math.max(0, Math.floor((cy - r) / CELL_SIZE) * CELL_SIZE); y < cy + r; y += CELL_SIZE) {
@@ -725,18 +789,15 @@ function updateParticles() {
   }
 }
 
-// kept as its own step, decoupled from moveHero(): the camera reads hero.x/y
-// but never feeds back into hero's own position. Still a hard lock on both
-// axes - position-locking + lerp-smoothing is a TODO.md item.
-function followCamera() {
-  // centre on the hero in buffer space. Once the camera drifts past a buffer
-  // edge, page THAT axis (shift the buffer content, patch the newly exposed
-  // strip, re-seat cameraX/cameraY near the middle) in one jump rather than
-  // paging every frame - the 2x buffer-vs-viewport size each way is the
-  // lookahead margin. The map itself has no bounds; this only moves the finite
-  // buffer window around under the drill.
-  cameraX = hero.x + hero.w / 2 - CAMERA_WIDTH / 2;
-  cameraY = hero.y + hero.h / 2 - CAMERA_HEIGHT / 2;
+// centre the camera on a point in BUFFER space. Once it lands past a buffer
+// edge, page THAT axis (shift the buffer content, patch the newly exposed
+// strip) so the camera re-seats near the buffer's middle - the delta is
+// computed to land it AT the middle, so this stays correct for an arbitrary
+// jump, not just a one-frame drift. The map itself has no bounds; this only
+// moves the finite buffer window around.
+function centerCameraOn(bx, by) {
+  cameraX = bx - CAMERA_WIDTH / 2;
+  cameraY = by - CAMERA_HEIGHT / 2;
   if (cameraX < 0 || cameraX > MAP.width - CAMERA_WIDTH) {
     const margin = (MAP.width - CAMERA_WIDTH) / 2;
     scrollMap(Math.round((cameraX - margin) / CELL_SIZE) * CELL_SIZE, 0);
@@ -745,6 +806,64 @@ function followCamera() {
     const margin = (MAP.height - CAMERA_HEIGHT) / 2;
     scrollMap(0, Math.round((cameraY - margin) / CELL_SIZE) * CELL_SIZE);
   }
+}
+
+// kept as its own step, decoupled from moveHero(): the camera reads hero.x/y
+// but never feeds back into hero's own position. Still a hard lock on both
+// axes - position-locking + lerp-smoothing is a TODO.md item.
+function followCamera() {
+  centerCameraOn(hero.x + hero.w / 2, hero.y + hero.h / 2);
+}
+
+// hard-cut the camera onto a world-x / underground-y point, however far. Folds
+// the whole delta into mapOffset/mapOffsetX and full-repaints - the same
+// bookkeeping as reanchorBuffer(), just aimed at an arbitrary point instead of
+// the hero - so it survives a jump bigger than scrollMap()'s self-blit could
+// page (the rewind skip, landing on the surface from deep underground).
+function jumpCameraTo(wx, uy) {
+  const dx = Math.round((wx - mapOffsetX - MAP.width  / 2) / CELL_SIZE) * CELL_SIZE;
+  const dy = Math.round((uy + SURFACE_Y - mapOffset - MAP.height / 2) / CELL_SIZE) * CELL_SIZE;
+  hero.x -= dx; mapOffsetX += dx;
+  hero.y -= dy; mapOffset  += dy;
+  for (const p of particles) if (p.stage === 0) { p.x -= dx; p.y -= dy; }
+  cameraX = wx - mapOffsetX - CAMERA_WIDTH / 2;
+  cameraY = uy + SURFACE_Y - mapOffset - CAMERA_HEIGHT / 2;
+  renderMap();
+}
+
+// REWIND_SCREEN: walk the camera back down the drilled path (`trail`, world /
+// underground space) from where the drill stopped up to the surface, then hand
+// over to END_SCREEN. Faithfully replays loops - seeing your own detour at
+// speed is the point. gameTime keeps running so the dust rainbow stays alive.
+function updateRewind() {
+  // distance to travel along the polyline this frame. On skip, consume it all
+  // at once. Otherwise cap the frame delta - after a long hitch / tab-away an
+  // uncapped step could move the camera further than a whole buffer and
+  // scrollMap()'s self-blit would read past the edge (rewindSpeed*0.1 stays
+  // inside the 2x buffer given the CAMERA_WIDTH*8 clamp in endGame; the two
+  // constants are load-bearing together).
+  let step = rewindSkip ? Infinity : rewindSpeed * Math.min(elapsedTime, 0.1);
+  // advance the (rewindI, rewindT) cursor toward trail[0] along the polyline
+  while (step > 0 && rewindI > 0) {
+    const ax = trail[2 * rewindI],     ay = trail[2 * rewindI + 1];
+    const bx = trail[2 * rewindI - 2], by = trail[2 * rewindI - 1];
+    const seg = Math.hypot(bx - ax, by - ay) || 1;
+    const left = (1 - rewindT) * seg;
+    if (step < left) { rewindT += step / seg; step = 0; }
+    else { step -= left; rewindI--; rewindT = 0; }
+  }
+  if (rewindI === 0) {
+    // reached the surface: hard-cut there (the skip delta can exceed a buffer)
+    // and hand off. endReady is re-cleared - time passed during the rewind.
+    jumpCameraTo(trail[0], trail[1]);
+    endReady = false;
+    screen = END_SCREEN;
+    return;
+  }
+  const j = rewindI - 1;
+  const wx = lerp(trail[2 * rewindI],     trail[2 * j],     rewindT);
+  const wy = lerp(trail[2 * rewindI + 1], trail[2 * j + 1], rewindT);
+  centerCameraOn(wx - mapOffsetX, wy + SURFACE_Y - mapOffset);
 }
 
 // self-blit the MAP + DUST_MASK buffers by (dx, dy) px and patch only the
@@ -809,6 +928,11 @@ function scrollMap(dx, dy) {
 // CELL_SIZE-snapped so the DUG key grid still lines up (dig() floors to cells;
 // an unaligned offset would orphan every already-dug cell on the next repaint).
 function reanchorBuffer() {
+  // a resize mid-rewind reallocates the buffers under the animation and
+  // re-seats the camera on the (deep) hero - resuming from there would feed
+  // updateRewind() a buffer-busting jump. Just abandon the rewind and show the
+  // score over wherever the hero is.
+  if (screen === REWIND_SCREEN) { screen = END_SCREEN; rewound = false; }
   const dx = Math.round((hero.x - MAP.width  / 2) / CELL_SIZE) * CELL_SIZE;
   const dy = Math.round((hero.y - MAP.height / 2) / CELL_SIZE) * CELL_SIZE;
   hero.x -= dx; mapOffsetX += dx;
@@ -886,15 +1010,24 @@ function render() {
       // uncomment to debug mobile input handlers
       // renderDebugTouch();
       break;
-    case END_SCREEN:
-      // keep the map + last hero position on screen (less jarring than a
-      // flat wipe, and the player sees where they ran out); just overlay
-      // the outcome text.
+    case REWIND_SCREEN:
+      // just the world, scrolling past under the camera - no HUD, no text.
       clearBuffer();
       renderDust();
       renderParticles();
-      BUFFER_CTX.fillStyle = '#2255ee';
-      BUFFER_CTX.fillRect(hero.x, hero.y, hero.w, hero.h);
+      break;
+    case END_SCREEN:
+      // hold the world where the rewind left it (surface + tunnel mouth), or
+      // where the drill resurfaced, and overlay the score. The drill sprite is
+      // drawn only when there was no rewind (resurface win, or a resize that
+      // abandoned it) - it's still on screen in those cases.
+      clearBuffer();
+      renderDust();
+      renderParticles();
+      if (!rewound) {
+        BUFFER_CTX.fillStyle = '#2255ee';
+        BUFFER_CTX.fillRect(hero.x, hero.y, hero.w, hero.h);
+      }
       // one neutral headline - no win/lose split any more (the run just ends,
       // see endGame()). outcome is still recorded for future share text.
       renderText('well dug!', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 - 2 * HUD_LINE, ALIGN_CENTER, HUD_SCALE + 1);

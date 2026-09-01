@@ -67,6 +67,19 @@ early with whatever momentum is left. Both end conditions show one neutral
 headline (`well dug!`) — no win/lose split. (This replaces the earlier
 bingo-fuel lose condition — see TODO.md "Won't do: Bingo-fuel warning".)
 
+**Camera rewind.** When the run ends *underground* (momentum stalled out
+mid-dig), the camera walks the drilled path back up to the surface before the
+score appears — a short cutscene that shows off the tunnel the player carved
+(and, later, the rainbow beamed up it). The path is recorded live as a coarse
+breadcrumb polyline (`trail`, a point every `TRAIL_STEP` of drill travel, in
+scroll-invariant world/underground space); `REWIND_SCREEN` lerps the camera
+back down it at a speed derived from the true path length so the walk always
+takes about `REWIND_DURATION` (~1.1s) regardless of route, loops and detours
+replayed faithfully. Any key/tap during the rewind fast-forwards straight to
+the surface. A **resurface** end skips the rewind entirely — the camera is
+already at the surface, and the rainbow will sprout from that egress point
+rather than the original tunnel mouth.
+
 Dense dust tops momentum back up (`MOMENTUM.denseBoost` px/sec per dense
 cell dug — `digShaft()` clears several cells per tick, so entering a patch
 gives a jolt), so a deeper dive stays alive longer when the drilled route

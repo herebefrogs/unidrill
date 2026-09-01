@@ -107,12 +107,15 @@ for the reasoning behind each of these; this is just the sequencing.
       2. Rainbow in the sky. Camera fast-scrolls up to the surface; a rainbow
          grows out of the tunnel mouth into the sky, its width proportional
          to `score`.
-      3. Rainbow beam up the tunnel. While the camera scrolls up, a rainbow
-         stream starts at the player sprite and backtracks the tunnel to the
-         surface. Keep a running list of approximate segments as the player
-         drills (append as the shaft is carved); the beam walks that list
-         back. Camera locks onto the beam's tip instead of the player for the
-         duration. Ties into the "drop resurfacing as a win" idea below.
+      3. Rainbow beam up the tunnel. PARTIALLY DONE — the trail + camera
+         walk-back mechanism is in: `trail` (a breadcrumb polyline appended in
+         `recordTrail()` every `TRAIL_STEP` of drill travel, world/underground
+         space), and `REWIND_SCREEN` / `updateRewind()` which lerps the camera
+         back down it to the surface over ~`REWIND_DURATION`, then hands to
+         END_SCREEN. Any press fast-forwards to the surface. A resurface end
+         skips the rewind (camera's already up there). STILL TO DO: the rainbow
+         stream visual itself — draw it along the trail behind the camera tip
+         as the rewind plays. See DESIGN.md "Run end / score — Camera rewind".
 - [ ] Music and sound effects. SFX for: collecting a dust cell, the dust
       counter tally-tick, stalling out (momentum hits 0), and sprouting the
       end-run rainbow. Plus background music. Helpers in src/js/sound.js
