@@ -84,12 +84,73 @@ let speak;
 
 // RENDER VARIABLES
 
-// viewport's top-left in BUFFER space (both axes). followCamera() keeps the
-// hero centred; when the camera drifts past a buffer edge scrollMap() pages
-// that axis and re-seats cameraX/cameraY near the middle again. Fractional
+// viewport's top-left in BUFFER space (both axes). followCamera() aims to
+// keep the hero centred; when the camera drifts past a buffer edge scrollMap()
+// pages that axis and re-seats cameraX/cameraY near the middle again. Fractional
 // (blit/clearBuffer/renderDust all Math.floor it).
 let cameraX = 0;
 let cameraY = 0;
+// the camera carries its own velocity (px/sec, BUFFER space) - it's a spring,
+// not a lerp (see below). scrollMap() leaves these untouched: paging shifts
+// cameraX and its target by the same delta, so the spring state is invariant.
+let cameraVX = 0;
+let cameraVY = 0;
+// cameraFocus is a LAGGED copy of the hero's velocity vector (px/sec), eased
+// toward the live value over CAMERA_LOOKAHEAD_LAG. The look-ahead target is
+// built from this, not the instantaneous velocity - see the block below.
+let cameraFocusX = 0;
+let cameraFocusY = 0;
+// position-locking + spring-smoothing + lagged-velocity look-ahead (the
+// article's "projected focus"; see DESIGN.md camera tracking). The camera is a
+// damped spring chasing  hero_centre + CAMERA_LOOKAHEAD * cameraFocus  where
+// cameraFocus lags the hero's true velocity.
+//
+//   CAMERA_STIFFNESS  natural frequency omega (rad/s). A spring chasing a
+//                     target moving at constant speed v trails it by exactly
+//                     2*zeta*v/omega.
+//   CAMERA_DAMPING    zeta. <1 underdamped (overshoots centre on the reel-in =
+//                     a snap, not a glide), 1 = critical, >1 sluggish.
+//   CAMERA_LOOKAHEAD  seconds. Leads the target by focus_speed*LOOKAHEAD px.
+//                     At LOOKAHEAD = 2*zeta/omega, and once cameraFocus has
+//                     caught up to the true velocity, this exactly cancels the
+//                     spring trail => the cruising hero sits DEAD CENTRE at any
+//                     steady speed.
+//   CAMERA_LOOKAHEAD_LAG  seconds. How slowly cameraFocus tracks the real
+//                     velocity - and therefore how hard a *sudden* velocity
+//                     change throws the hero off centre. On a dense-patch boost
+//                     the real speed jumps but cameraFocus hasn't caught up, so
+//                     the look-ahead term is too short to cancel the (now
+//                     larger) spring trail and the hero swings forward toward
+//                     the ring; as cameraFocus catches up over ~LAG the centre
+//                     lock restores and the spring reels the hero back. Bigger
+//                     boost => bigger velocity jump => bigger throw. A hard
+//                     turn works the same way: cameraFocus keeps pointing the
+//                     OLD heading for ~LAG, so the target leads off the old way
+//                     and the camera hangs behind the turn (#4). This is the
+//                     ONLY knob for transient throw size; it doesn't touch the
+//                     centre lock or the reel-in speed. Raise for more drama.
+//
+// Targets (all playtest bait): cruising hero dead centre; a full boost
+// (momentum jumps toward MOMENTUM.overMax 800) throws it ~to the ring forward
+// along heading; reel-in settles < 0.5s (~4/(zeta*omega) + LAG). Worst-case
+// throw + turn transient must stay inside CAMERA_WIDTH/2 (~178px on the
+// narrowest phone) or the hero clips the camera slice into unpainted buffer -
+// stiffen omega or shorten LAG if it does, don't grow the ring.
+// updateRewind() reuses the spring WITHOUT look-ahead (a trail point has no
+// velocity); the bare spring's inertia is what skips the loopy-loops and
+// catches the camera on the next straight - #5, the same as the turn overshoot
+// with a different target.
+const CAMERA_DEADZONE = 100;      // debug ring radius only - visual gauge for a full-boost throw; no effect on the sim. 100 not 112 to keep some horizontal terrain visible ahead on a narrow portrait screen
+const CAMERA_STIFFNESS = 15;      // omega, rad/s
+const CAMERA_DAMPING = 1.0;       // zeta. >=1 => reel-in is an ease-in/ease-out S-curve (accelerates from rest, gentle arrival, no overshoot); <1 snappier + overshoots
+const CAMERA_LOOKAHEAD = 0.133;   // seconds; == 2*zeta/omega so steady-speed lag is ~0 - move in lockstep with zeta
+const CAMERA_LOOKAHEAD_LAG = 0.22; // seconds; transient throw size AND how long the hero hangs thrown-out before the reel-in - raise for more drama
+// draw the CAMERA_DEADZONE ring + a screen-centre crosshair over GAME/REWIND so
+// the hero's (and the rewind cursor's) drift off centre is visible while tuning
+// the constants above. Off by default; flip on to re-tune. (TODO.md: the draw
+// block in render() + this flag get deleted only if we're over budget at
+// submission.)
+const DEBUG_CAMERA = false;
 // screen pixels per world pixel - the ONE knob for how big everything (dust
 // cells, HUD font, hero) renders. blit() stretches the viewport onto the
 // canvas by exactly this factor on every device, so a dust cell is always
@@ -585,7 +646,7 @@ function update() {
     // momentum after game-over.
     if (screen === GAME_SCREEN) {
       digShaft();
-      followCamera();
+      followCamera(true);
       recordTrail();
     }
   }
@@ -832,15 +893,32 @@ function updateParticles() {
   }
 }
 
-// centre the camera on a point in BUFFER space. Once it lands past a buffer
-// edge, page THAT axis (shift the buffer content, patch the newly exposed
-// strip) so the camera re-seats near the buffer's middle - the delta is
-// computed to land it AT the middle, so this stays correct for an arbitrary
-// jump, not just a one-frame drift. The map itself has no bounds; this only
-// moves the finite buffer window around.
-function centerCameraOn(bx, by) {
-  cameraX = bx - CAMERA_WIDTH / 2;
-  cameraY = by - CAMERA_HEIGHT / 2;
+// move the camera toward a point in BUFFER space. smooth=true advances the
+// damped spring (cameraVX/VY) one frame toward it; smooth omitted/false is a
+// hard cut (snap + kill the spring velocity), which is what the
+// seat/reanchor/skip callers want. Once the camera lands past a buffer edge,
+// page THAT axis (shift the buffer content, patch the newly exposed strip) so
+// it re-seats near the buffer's middle - the delta is computed to land it AT
+// the middle, so this stays correct for an arbitrary jump, not just a
+// one-frame drift. The map itself has no bounds; this only moves the finite
+// buffer window around.
+function centerCameraOn(bx, by, smooth) {
+  const tx = bx - CAMERA_WIDTH / 2, ty = by - CAMERA_HEIGHT / 2;
+  if (smooth) {
+    // damped-spring step, fixed-substepped so it's stable and frame-rate
+    // independent (omega*h stays small whatever the real frame took). elapsed
+    // is capped like everywhere else; a slow frame just under-advances one tick.
+    const k = CAMERA_STIFFNESS, z = CAMERA_DAMPING;
+    for (let rem = Math.min(elapsedTime, 0.1); rem > 0; rem -= 1 / 120) {
+      const h = Math.min(1 / 120, rem);
+      cameraVX += (k * k * (tx - cameraX) - 2 * z * k * cameraVX) * h;
+      cameraVY += (k * k * (ty - cameraY) - 2 * z * k * cameraVY) * h;
+      cameraX += cameraVX * h;
+      cameraY += cameraVY * h;
+    }
+  } else {
+    cameraX = tx; cameraY = ty; cameraVX = cameraVY = 0;
+  }
   if (cameraX < 0 || cameraX > MAP.width - CAMERA_WIDTH) {
     const margin = (MAP.width - CAMERA_WIDTH) / 2;
     scrollMap(Math.round((cameraX - margin) / CELL_SIZE) * CELL_SIZE, 0);
@@ -852,10 +930,24 @@ function centerCameraOn(bx, by) {
 }
 
 // kept as its own step, decoupled from moveHero(): the camera reads hero.x/y
-// but never feeds back into hero's own position. Still a hard lock on both
-// axes - position-locking + lerp-smoothing is a TODO.md item.
-function followCamera() {
-  centerCameraOn(hero.x + hero.w / 2, hero.y + hero.h / 2);
+// but never feeds back into hero's own position. smooth=true (the gameplay
+// call) eases cameraFocus toward the live hero velocity and springs toward a
+// target that leads the hero by CAMERA_LOOKAHEAD * cameraFocus - a lagged
+// velocity, so a sudden speed/heading change throws the hero off centre before
+// the lock restores (see the CAMERA_* block). The seat/reanchor calls pass
+// nothing: hard lock, and cameraFocus is snapped to the current velocity so
+// the new game / post-resize frame starts centred, no launch lurch.
+function followCamera(smooth) {
+  const vx = hero.momentum * hero.velX, vy = hero.momentum * hero.velY;
+  if (smooth) {
+    const a = 1 - Math.exp(-elapsedTime / CAMERA_LOOKAHEAD_LAG);
+    cameraFocusX = lerp(cameraFocusX, vx, a);
+    cameraFocusY = lerp(cameraFocusY, vy, a);
+  } else {
+    cameraFocusX = vx; cameraFocusY = vy;
+  }
+  centerCameraOn(hero.x + hero.w / 2 + cameraFocusX * CAMERA_LOOKAHEAD,
+                 hero.y + hero.h / 2 + cameraFocusY * CAMERA_LOOKAHEAD, smooth);
 }
 
 // hard-cut the camera onto a world-x / underground-y point, however far. Folds
@@ -871,6 +963,7 @@ function jumpCameraTo(wx, uy) {
   for (const p of particles) if (p.stage === 0) { p.x -= dx; p.y -= dy; }
   cameraX = wx - mapOffsetX - CAMERA_WIDTH / 2;
   cameraY = uy + SURFACE_Y - mapOffset - CAMERA_HEIGHT / 2;
+  cameraVX = cameraVY = 0;   // hard cut - kill any spring velocity so it doesn't drift off the landing point
   renderMap();
 }
 
@@ -896,8 +989,20 @@ function updateRewind() {
     else { step -= left; rewindI--; rewindT = 0; }
   }
   if (rewindI === 0) {
-    // reached the surface: hard-cut there (the skip delta can exceed a buffer)
-    // and hand off. endReady is re-cleared - time passed during the rewind.
+    // cursor's at the surface, but the smoothed camera lags behind it - the
+    // more the run looped, the further. On a natural finish let it ease in
+    // until the tunnel mouth is within the dead zone before handing off, so
+    // there's no jump cut into the score screen. On a skip, don't wait:
+    // hard-cut there (the skip delta from deep underground can exceed what
+    // scrollMap can page).
+    const bx = trail[0] - mapOffsetX, by = trail[1] + SURFACE_Y - mapOffset;
+    if (!rewindSkip &&
+        Math.hypot(bx - CAMERA_WIDTH / 2 - cameraX, by - CAMERA_HEIGHT / 2 - cameraY) > CAMERA_DEADZONE) {
+      centerCameraOn(bx, by, true);
+      return;
+    }
+    // reached the surface: hard-cut there and hand off. endReady is re-cleared
+    // - time passed during the rewind.
     jumpCameraTo(trail[0], trail[1]);
     endReady = false;
     screen = END_SCREEN;
@@ -906,7 +1011,8 @@ function updateRewind() {
   const j = rewindI - 1;
   const wx = lerp(trail[2 * rewindI],     trail[2 * j],     rewindT);
   const wy = lerp(trail[2 * rewindI + 1], trail[2 * j + 1], rewindT);
-  centerCameraOn(wx - mapOffsetX, wy + SURFACE_Y - mapOffset);
+  // smooth: round off the corners where the drilled path looped back on itself
+  centerCameraOn(wx - mapOffsetX, wy + SURFACE_Y - mapOffset, true);
 }
 
 // self-blit the MAP + DUST_MASK buffers by (dx, dy) px and patch only the
@@ -1093,6 +1199,20 @@ function render() {
   }
 
   blit();
+
+  if (DEBUG_CAMERA && (screen === GAME_SCREEN || screen === REWIND_SCREEN)) {
+    // screen space, straight on the visible canvas after the blit. CAMERA_DEADZONE
+    // is world px; blit stretches CAMERA_WIDTH world px across c.width screen px.
+    const s = c.width / CAMERA_WIDTH;
+    const mx = c.width / 2, my = c.height / 2, r = CAMERA_DEADZONE * s;
+    CTX.strokeStyle = 'rgba(255,255,255,.4)';
+    CTX.lineWidth = 1;
+    CTX.beginPath();
+    CTX.arc(mx, my, r, 0, 2 * Math.PI);
+    CTX.moveTo(mx - r - 12, my); CTX.lineTo(mx + r + 12, my);
+    CTX.moveTo(mx, my - r - 12); CTX.lineTo(mx, my + r + 12);
+    CTX.stroke();
+  }
 };
 
 // dust colour layer: lift the camera slice of DUST_MASK, colour it by masking

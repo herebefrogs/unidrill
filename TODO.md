@@ -123,6 +123,27 @@ for the reasoning behind each of these; this is just the sequencing.
          skips the rewind (camera's already up there). STILL TO DO: the rainbow
          stream visual itself — draw it along the trail behind the camera tip
          as the rewind plays. See DESIGN.md "Run end / score — Camera rewind".
+- [x] Camera tracking: position-locking + spring-smoothing + projected focus.
+      RESOLVED. The camera is a (near-)critically-damped spring (`CAMERA_STIFFNESS`
+      ω, `CAMERA_DAMPING` ζ) chasing `hero_centre + CAMERA_LOOKAHEAD · cameraFocus`,
+      where `cameraFocus` is a lagged copy of the hero's velocity eased over
+      `CAMERA_LOOKAHEAD_LAG`. `CAMERA_LOOKAHEAD = 2ζ/ω` cancels the spring's
+      steady trailing lag once `cameraFocus` has caught up → the cruising hero
+      sits dead centre at any speed. A sudden speed change (dense-dust boost) or
+      heading change (hard turn) isn't in `cameraFocus` yet, so the look-ahead
+      term is briefly too short and the hero swings forward-of-centre toward the
+      debug ring; as `cameraFocus` catches up the centre-lock restores and the
+      spring reels the hero back on an ease-in/ease-out S-curve (ζ ≥ 1). Bigger
+      boost → bigger throw. `updateRewind()` reuses the bare spring (no
+      look-ahead) — its inertia skips the loopy-loops and catches the camera on
+      the next straight. `centerCameraOn()` runs the spring (120 Hz substepped,
+      stable + frame-rate independent); `followCamera()` adds the projected
+      focus; hard-lock callers (seat / `reanchorBuffer` / rewind skip) pass no
+      `smooth`, zero the spring velocity and snap the focus. Tuning (`CAMERA_*`
+      block in game.js) is playtest bait — ζ and `CAMERA_LOOKAHEAD` must move in
+      lockstep. `CAMERA_DEADZONE` + `DEBUG_CAMERA` draw a debug ring/crosshair,
+      off by default (see the Later/revisit note). See DESIGN.md "Graphics —
+      Camera".
 - [ ] Music and sound effects. SFX for: collecting a dust cell, the dust
       counter tally-tick, stalling out (momentum hits 0), and sprouting the
       end-run rainbow. Plus background music. Helpers in src/js/sound.js
@@ -135,11 +156,6 @@ for the reasoning behind each of these; this is just the sequencing.
       ahead). Legs wiggle like digging/swimming, wiggle rate proportional to
       player speed (`hero.momentum`). Keep the collision AABB (`HERO_W/H`)
       as-is; this is render-only.
-- [ ] Camera tracking: position-locking + lerp-smoothing. Camera aims to
-      hold the player at the exact screen center, but lets them drift away
-      temporarily (e.g. a dense-dust velocity boost) and each frame lerps
-      the center-to-player gap back down toward zero. See DESIGN.md's open
-      question on camera tracking.
 - [ ] RNG seeds. Give the underground generation its own seeded RNG,
       initialized from the string `JS13K2026`. Nothing else may draw from
       the underground RNG — if some other system needs randomness, spin up
@@ -212,6 +228,11 @@ for the reasoning behind each of these; this is just the sequencing.
       frame once deep), so it's tuned for that. HUD also got a pass: 3x font,
       top-left + left-aligned so labels don't shift, "momentum" relabelled
       "speed", loss text "tapped out!", dust-counter value pops on each tally.
+- [ ] Delete the camera-tuning debug overlay — the `DEBUG_CAMERA` flag and the
+      ring/crosshair draw block at the end of `render()` in game.js. **Only if
+      we're over the 13 KB budget at submission time.** As of the camera-tracking
+      commit there's ~40–50% budget headroom, so keep it for now — it's handy
+      for re-tuning the `CAMERA_*` constants.
 - [ ] Pick the game name. Avoid "unicorn" / "rainbow" / "prism" — every
       other entry will lean on those. Front-runner: **Gusher** (the end-run
       rainbow erupts out of the tunnel mouth like an oil gusher — names the

@@ -195,6 +195,33 @@ origin currently sits at; both stay cell-aligned so the dug-cell set still
 lines up after a page. World-x can go negative once the drill heads left of
 its start.
 
+**Camera tracking — position-locking + spring + projected focus.** The camera
+is a near-critically-damped spring (own velocity, 120 Hz substepped) chasing a
+target that leads the hero by a *lagged* copy of its velocity (`cameraFocus`,
+eased toward the true velocity over `CAMERA_LOOKAHEAD_LAG`). Once the lag has
+caught up the lead exactly cancels the spring's steady trailing offset
+(`CAMERA_LOOKAHEAD = 2ζ/ω`), so a cruising hero sits **dead centre at any
+speed** — no drift with velocity, only with acceleration. The intended feel,
+in order of situation:
+
+- *Steady drilling:* hero locked to screen centre.
+- *Dense-patch boost:* the speed jumps but `cameraFocus` hasn't caught up, so
+  the lead is briefly too short — the hero swings **forward of centre** toward
+  the edge of a notional circle (~`CAMERA_DEADZONE` px), further for a bigger
+  boost. Then as `cameraFocus` catches up the lock restores and the spring
+  reels the hero back on an **ease-in / ease-out S-curve** (ζ ≥ 1, no
+  overshoot). "Enjoy the boost, then get pulled back faster and faster."
+- *Hard turn:* `cameraFocus` keeps pointing the old heading for a moment, so
+  the camera hangs behind the turn and catches up after.
+- *End-of-run rewind:* the camera walks the drilled `trail` back to the
+  surface on the **bare spring, no look-ahead** — its inertia skips tight
+  loops/knots and re-catches the path on the next straight, which is what
+  keeps a loopy run from being motion-sickening.
+
+All `CAMERA_*` constants (game.js) are playtest bait; ζ and `CAMERA_LOOKAHEAD`
+move together. A `DEBUG_CAMERA` flag draws the centre crosshair + ring for
+re-tuning, off by default.
+
 **Dust rainbow.** Dust cells are coloured by sampling a **repeating diagonal
 rainbow** (↘, top-left → bottom-right) — `DUST_PALETTE`, the 7 rainbow hues
 (hand-picked hex, kept a touch muted so no band flares), `DUST_BAND` px per
@@ -460,14 +487,8 @@ mid-flight, see Graphics — Collection animation), not at dig time.
 
 ## Open questions
 
-- Camera tracking: target model is **position-locking + lerp-smoothing** —
-  the camera aims to hold the hero at the exact screen centre, but lets the
-  hero drift off-centre temporarily (e.g. a dense-dust velocity boost) and
-  each frame lerps the centre-to-hero gap back toward zero. Currently it
-  hard-locks to the hero's centre (`followCamera()`), which reads as
-  jittery/robotic. Also still vertical-only — camera x is pinned to 0. See
-  https://gamedesignskills.com/game-design/camera-design-2d-side-scroller-games/
-  (warning: heavy with animated gifs) for a survey of options.
+- Camera tracking: RESOLVED — spring + projected focus off a lagged velocity,
+  see "Graphics — Camera tracking" above. Constants are still playtest bait.
 - Rock deflection behavior (once rock is added) — bounce angle, momentum
   cost, or both?
 - Dense-dust momentum boost: RESOLVED. Shipped **per collected cell**

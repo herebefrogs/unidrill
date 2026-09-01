@@ -5,7 +5,7 @@
 
  | File | What's in it |
  |---|---|
- | `src/js/game.js` | **Everything gameplay**: RAF loop, the 4 screens (TITLE/GAME/REWIND/END), `hero` state + `moveHero()` + momentum/drag + win-lose + the overspeed bleed (`MOMENTUM.max`/`overMax`/`overBleed`), camera follow on both axes (`followCamera`/`centerCameraOn`/`jumpCameraTo`), the end-of-run camera rewind (`trail`/`recordTrail`/`updateRewind`/`TRAIL_STEP`/`REWIND_DURATION` — walks the drilled breadcrumb path back to the surface; skipped on a resurface end), the END_SCREEN rainbow sprout (`renderRainbow`/`RAINBOW_*`/`rainbowX`/`rainbowT` — a semicircle grown from the tunnel mouth, size saturating on dust collected; no dust → no rainbow + `dry run!` headline), the retry gate (`endReady`/`endHeld` — a leftover held key can't lock or trigger the restart), viewport sizing (`RENDER_SCALE`/`resizeViewport`/`reanchorBuffer`), the `MAP` buffer paging in X and Y (`scrollMap`/`paintRow`/`paintCol`/`paintCell`/`clearBuffer`, `mapOffset`/`mapOffsetX`), digging (`digShaft`/`dig`/`DUG`), the dust rainbow layer (`DUST_MASK`/`DUST_GRADIENT`/`DUST_PATTERN`/`renderDust`), dust collection particles (`spawnDustParticle`/`updateParticles`/`renderParticles`), the HUD (`HUD_*`/`PX_PER_M`/`DUST_COUNTER_*`/`DUST_POP_DURATION`/`SPEED_VALUE_*`, drawn inline in `render()` — both the `dust:` and `speed:` values are drawn separately from their labels so only the number does the 2x pop), all rendering, input dispatch (`processInputs`). |
+ | `src/js/game.js` | **Everything gameplay**: RAF loop, the 4 screens (TITLE/GAME/REWIND/END), `hero` state + `moveHero()` + momentum/drag + win-lose + the overspeed bleed (`MOMENTUM.max`/`overMax`/`overBleed`), camera follow on both axes — a damped spring (`centerCameraOn` runs it, 120 Hz substepped) chasing a target that leads the hero by a *lagged* velocity (`followCamera` builds it: `cameraFocus`/`cameraVX`/`cameraVY` + the `CAMERA_*` block — ω/ζ/`LOOKAHEAD`/`LOOKAHEAD_LAG`/`DEADZONE`; ζ and `LOOKAHEAD` move in lockstep). Hard-lock callers (seat / `reanchorBuffer` / `jumpCameraTo` / rewind skip) pass no `smooth`. `DEBUG_CAMERA` draws a tuning ring, off. The end-of-run camera rewind (`trail`/`recordTrail`/`updateRewind`/`TRAIL_STEP`/`REWIND_DURATION` — walks the drilled breadcrumb path back to the surface; skipped on a resurface end), the END_SCREEN rainbow sprout (`renderRainbow`/`RAINBOW_*`/`rainbowX`/`rainbowT` — a semicircle grown from the tunnel mouth, size saturating on dust collected; no dust → no rainbow + `dry run!` headline), the retry gate (`endReady`/`endHeld` — a leftover held key can't lock or trigger the restart), viewport sizing (`RENDER_SCALE`/`resizeViewport`/`reanchorBuffer`), the `MAP` buffer paging in X and Y (`scrollMap`/`paintRow`/`paintCol`/`paintCell`/`clearBuffer`, `mapOffset`/`mapOffsetX`), digging (`digShaft`/`dig`/`DUG`), the dust rainbow layer (`DUST_MASK`/`DUST_GRADIENT`/`DUST_PATTERN`/`renderDust`), dust collection particles (`spawnDustParticle`/`updateParticles`/`renderParticles`), the HUD (`HUD_*`/`PX_PER_M`/`DUST_COUNTER_*`/`DUST_POP_DURATION`/`SPEED_VALUE_*`, drawn inline in `render()` — both the `dust:` and `speed:` values are drawn separately from their labels so only the number does the 2x pop), all rendering, input dispatch (`processInputs`). |
  | `src/js/terrain.js` | Pure procedural terrain: `sampleMaterial(x,y)` (macro sections + rock-blob pass) and `sampleDust(x,y)` → `DUST_NONE`/`SPARSE`/`DENSE` (own microgrid, wobbly patches, quarter-grid dither for sparse). `CELL_SIZE`, materials `SAND`/`CLAY`, `MATERIAL_COLOR`, `MATERIAL_DRAG`. All keyed off the stateless `hash2D` — nothing stored, recomputed on demand. |
  | `src/js/inputs/keyboard.js`, `inputs/pointer.js` | Raw input capture only (see Game engine below). `pointer.js`'s drag-direction logic is deliberately unusual — ask before touching. |
  | `src/js/text.js` | Bitmap text (`renderText`, `CHARSET_SIZE`, `ALIGN_*`). `renderText`'s 5th arg is an integer `scale` (HUD draws at 3). |
@@ -36,9 +36,10 @@
    *reallocates every offscreen buffer* — `BUFFER`/`MAP`/`DUST_MASK` are
    `2×CAMERA_WIDTH × 2×CAMERA_HEIGHT` (a scroll-lookahead margin each way),
    `DUST_LAYER`/`TEXT` viewport-sized; `DUST_PATTERN` and `TEXT` are `let`,
-   re-created on resize. No `hero.x` clamp anywhere. `followCamera()`
-   centres `cameraX`/`cameraY` on the hero (unclamped, fractional) and, when
-   either drifts past a buffer edge, calls `scrollMap(dx, dy)` to page that
+   re-created on resize. No `hero.x` clamp anywhere. `followCamera()` springs
+   `cameraX`/`cameraY` toward the hero's projected focus (unclamped, fractional
+   — see the camera bullet below) and, when either drifts past a buffer edge,
+   `centerCameraOn()` calls `scrollMap(dx, dy)` to page that
    axis — self-blit the pixels, `mapOffsetX`/`mapOffset += delta`,
    `paintCol()`/`paintRow()` the newly exposed strip (both go through the
    shared `paintCell()`), re-seat `hero`/`camera`/stage-0 particles by the
@@ -75,6 +76,21 @@
    self-blits by the scroll delta; `paintRow()` (Y page) / `paintCol()` (X
    page) repaint only the newly exposed strip. `followCamera()` passes one
    axis at a time.
+ - **The camera is a damped spring toward a lagged-velocity look-ahead, not a
+   lerp to the hero.** `centerCameraOn()` runs the spring (`cameraVX/VY` state,
+   120 Hz substepped for stability); `followCamera()` eases `cameraFocus`
+   toward the true hero velocity over `CAMERA_LOOKAHEAD_LAG` and targets
+   `hero_centre + CAMERA_LOOKAHEAD·cameraFocus`. Invariants: `CAMERA_LOOKAHEAD`
+   must stay `≈ 2·ζ/ω` or the cruising hero drifts off-centre (it cancels the
+   spring's steady trailing lag) — **change ζ and `CAMERA_LOOKAHEAD`
+   together**. `scrollMap()` leaves `cameraVX/VY`/`cameraFocus` untouched (a
+   page shifts camera and target equally). Hard-lock paths (`followCamera()`
+   with no arg, `jumpCameraTo()`) must zero the spring velocity and snap the
+   focus. The feel spec (cruise-centred / boost-throw-then-S-curve-reel-in /
+   turn-hang / rewind-loop-skip) is in DESIGN.md "Graphics — Camera tracking";
+   don't retune without re-reading it. The whole thing was hard to land — many
+   dead ends (1st-order lerp, dead-zone rate switch, plain spring); the
+   lagged-velocity look-ahead is what made all four situations work at once.
  - **`DUST_MASK` is a second paged buffer, in lockstep with `MAP`.** Holds
    dust-cell *shapes* only (opaque white on transparent); `scrollMap()`
    self-blits it too (with `'copy'` — it's transparent-backed, so
