@@ -112,7 +112,8 @@ for the reasoning behind each of these; this is just the sequencing.
          `recordTrail()` every `TRAIL_STEP` of drill travel, world/underground
          space), and `REWIND_SCREEN` / `updateRewind()` which lerps the camera
          back down it to the surface over ~`REWIND_DURATION`, then hands to
-         END_SCREEN. Any press fast-forwards to the surface. A resurface end
+         END_SCREEN. A fresh press (key or pointer) fast-forwards to the
+         surface; input held over from gameplay doesn't count. A resurface end
          skips the rewind (camera's already up there). STILL TO DO: the rainbow
          stream visual itself — draw it along the trail behind the camera tip
          as the rewind plays. See DESIGN.md "Run end / score — Camera rewind".

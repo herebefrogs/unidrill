@@ -75,8 +75,10 @@ breadcrumb polyline (`trail`, a point every `TRAIL_STEP` of drill travel, in
 scroll-invariant world/underground space); `REWIND_SCREEN` lerps the camera
 back down it at a speed derived from the true path length so the walk always
 takes about `REWIND_DURATION` (~1.1s) regardless of route, loops and detours
-replayed faithfully. Any key/tap during the rewind fast-forwards straight to
-the surface. A **resurface** end skips the rewind entirely — the camera is
+replayed faithfully. A fresh key/tap — one that starts *during* the rewind —
+fast-forwards straight to the surface; a key still held from gameplay doesn't
+count (and releasing it costs nothing), so the player always sees the
+cutscene at least once. A **resurface** end skips the rewind entirely — the camera is
 already at the surface, and the rainbow will sprout from that egress point
 rather than the original tunnel mouth.
 

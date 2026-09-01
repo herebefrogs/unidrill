@@ -74,7 +74,8 @@ let rewound;                                     // did this run's end play the 
 let rewindI;                                     // index of the trail POINT the rewind camera is currently leaving, counting down to 0 (the surface)
 let rewindT;                                     // 0..1 progress from point rewindI toward point rewindI-1
 let rewindSpeed;                                 // px/sec the rewind camera travels along the polyline (derived from total path length / REWIND_DURATION, clamped)
-let rewindSkip;                                   // a press during the rewind sets this - updateRewind() then fast-forwards straight to the surface
+let rewindSkip;                                   // a fresh press during the rewind sets this - updateRewind() then fast-forwards straight to the surface
+let rewindArmed;                                  // gate for rewindSkip: only true once all input has been released since the rewind began, so a key held over from gameplay doesn't skip the cutscene the player never saw
 
 let speak;
 
@@ -520,11 +521,14 @@ function processInputs() {
       break;
     }
     case REWIND_SCREEN:
-      // any press fast-forwards the rewind - updateRewind() (runs right after
-      // this) then jumps to the surface and hands to END_SCREEN this same
-      // frame. A key still held then won't insta-restart: END_SCREEN waits for
-      // release before arming.
-      if (anyKeyDown() || isPointerDown()) rewindSkip = true;
+      // a FRESH press fast-forwards the rewind - updateRewind() (runs right
+      // after this) then jumps to the surface and hands to END_SCREEN the same
+      // frame. "Fresh" = input released at least once since the rewind began,
+      // so an arrow key held over from nervous drilling doesn't skip a
+      // cutscene the player never saw; releasing it costs nothing. (END_SCREEN
+      // then also waits for release before arming its retry.)
+      if (!anyKeyDown() && !isPointerDown()) rewindArmed = true;
+      if (rewindArmed && (anyKeyDown() || isPointerDown())) rewindSkip = true;
       break;
     case END_SCREEN:
       if (isKeyUp('KeyT')) {
@@ -668,6 +672,7 @@ function endGame(resurfaced) {
     rewindI = trail.length / 2 - 1;
     rewindT = 0;
     rewindSkip = false;
+    rewindArmed = false;
     // aim for REWIND_DURATION, but never crawl, and never jump more than a
     // half-buffer per frame (30fps worst case) or scrollMap's self-blit maths
     // would run past the buffer edge.
