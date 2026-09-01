@@ -1,4 +1,4 @@
-import { isKeyDown, anyKeyDown, isKeyUp } from './inputs/keyboard';
+import { isKeyDown, anyKeyDown, isKeyUp, whichKeyDown } from './inputs/keyboard';
 import { isPointerDown, isPointerUp, pointerCanvasPosition, pointerDirection } from './inputs/pointer';
 import { isMobile } from './mobile';
 import { checkMonetization, isMonetizationEnabled } from './monetization';
@@ -58,12 +58,15 @@ let hero;
 let heroWentDeep;                              // armed once depth passes MOMENTUM.winMinDepth; gates the resurface win
 let outcome;                                   // true = resurfaced with momentum to spare, false = momentum ran out underground; not surfaced to the player yet (END_SCREEN shows one neutral headline), kept for future share/highscore text
 let endReady;                                  // END_SCREEN: true once all inputs held at game-over have been released
+let endHeld;                                    // keys already down when END_SCREEN began (held over from gameplay / a rewind skip) - a press of anything NOT in here also restarts, so a leftover key doesn't lock the retry out (see processInputs END_SCREEN)
 let depth;                                     // px below the surface right now (world-space y). Still drives heroWentDeep + the resurface end - just no longer the score or a HUD line (both axes drill infinitely, so absolute depth reads arbitrary); see tunnel.
 let tunnel;                                     // px of virgin ground carved this run - accumulated in moveHero() while the drill's leading edge is cutting undug material (re-drilling an old shaft doesn't add). The scored "how far did you drill" measure; HUD "shaft".
 let dust;                                       // rainbow-dust cells collected this run (= DUG ∩ sampleDust), tallied when its particle lands on the counter (or instantly if the run ends first, see endGame()).
 let dustPop;                                     // gameTime of the last dust tally; drives the HUD counter's pop-and-shrink (see DUST_POP_DURATION)
 let particles;                                  // in-flight collection particles (screen-space); each carries the one dust point it's still owed until it lands or endGame() tallies it early
 let score;                                       // final run score, computed once in endGame() (after the early dust tally) = SCORE_PER_DUST*dust + metres of tunnel; shown on END_SCREEN
+let rainbowX;                                     // world-x of the END_SCREEN rainbow's foot (ingress point, or egress point on a resurface); set in endGame()
+let rainbowT;                                     // seconds accrued on END_SCREEN, drives the rainbow's grow sweep (see RAINBOW_GROW); reset in endGame(), advanced in update()
 // breadcrumb polyline of the drill's path, flat [wx0, uy0, wx1, uy1, ...] in
 // world-x / underground-y (scroll-invariant, like DUG keys - NOT buffer space).
 // Seeded at the surface-entry point in startGame(), appended in update() once
@@ -243,6 +246,22 @@ const SCORE_PER_DUST = 10;                            // points per dust cell (s
 const SCORE_PER_M = 2;                                // points per metre of virgin shaft carved
 const TRAIL_STEP = 4 * CELL_SIZE;                     // min drill travel between recorded breadcrumbs (see `trail`) - coarse is fine, the rewind camera lerps between points at speed
 const REWIND_DURATION = 1.1;                          // seconds the end-of-run camera rewind aims to take, whatever the path length (speed is derived, then clamped)
+// END_SCREEN rainbow: a full semicircle with its left foot on the tunnel
+// mouth (ingress point, or the egress point on a resurface), drawn as RAINBOW_BANDS
+// concentric strokes (DUST_PALETTE, red outermost). It draws itself in from
+// the left foot over the apex to the right foot (ease-out). Foot base
+// (band-stack thickness) and radius both scale with `dust` collected - dust
+// is the whole point, so a run that carved a long shaft but bagged no dust
+// still sprouts only a stub; shaft length feeds the score, not the rainbow.
+// The dust -> size curve SATURATES (k = dust / (dust + RAINBOW_DUST_HALF)):
+// more dust is always a bigger rainbow, no hard cap where every real run
+// pins to max, but with diminishing returns so a monster haul stays on-scale.
+// A big haul overflows the sky and clips, which is fine (see DESIGN.md).
+const RAINBOW_GROW = 1.4;                             // seconds for the arc to sweep the full 180 (left foot -> right foot)
+const RAINBOW_BANDS = DUST_PALETTE.length;
+const RAINBOW_DUST_HALF = 400;                        // dust at which the rainbow is half its max size; k = dust/(dust+this) (playtest knob - tune against the END screen's dust: line)
+const RAINBOW_R_MIN = 140, RAINBOW_R_MAX = 2000;     // outer radius at 0 dust / k->1 - kept well above FOOT_MAX so the inner radius (R - foot) stays positive; a big one clips off the top of the sky
+const RAINBOW_FOOT_MIN = 70, RAINBOW_FOOT_MAX = 640; // band-stack thickness at 0 dust / k->1 - MIN keeps the thinnest band (foot/7) legible (~10px); MAX lets a big haul bury the screen
 const HUD_SCALE = 3;                                  // bitmap-font magnification for the in-game HUD lines
 const HUD_LINE = HUD_SCALE * CHARSET_SIZE + 4;        // px between stacked HUD lines
 const HUD_X = CHARSET_SIZE;                           // left-aligned HUD origin (labels stay put as values gain/lose digits)
@@ -529,6 +548,10 @@ function processInputs() {
       // then also waits for release before arming its retry.)
       if (!anyKeyDown() && !isPointerDown()) rewindArmed = true;
       if (rewindArmed && (anyKeyDown() || isPointerDown())) rewindSkip = true;
+      // keep the "leftover keys" snapshot current: whatever is held on the last
+      // rewind frame (including the key that skipped it) is what END_SCREEN must
+      // treat as held-over rather than a restart press.
+      endHeld = whichKeyDown();
       break;
     case END_SCREEN:
       if (isKeyUp('KeyT')) {
@@ -539,12 +562,15 @@ function processInputs() {
           url: 'https://bit.ly/gmjblp'
         });
       }
-      // wait for every key/pointer held when the run ended to be released
-      // first, then a fresh press restarts - otherwise a steering key still
-      // down at the moment momentum ran out restarts instantly. (temporary:
-      // straight back into a new run, no title screen.)
+      // a steering key still down when the run ended (or one held to skip the
+      // rewind) must not restart instantly - but it also mustn't lock the retry
+      // out. Two ways to restart: release everything then press anything
+      // (endReady), OR press a key that wasn't already held when END_SCREEN
+      // began (not in endHeld - a genuinely fresh press). (temporary: straight
+      // back into a new run, no title screen.)
       if (!anyKeyDown() && !isPointerDown()) endReady = true;
-      if (endReady && (anyKeyDown() || isPointerUp())) startGame();
+      const freshPress = whichKeyDown().some(k => !endHeld.includes(k));
+      if ((endReady || freshPress) && (anyKeyDown() || isPointerUp())) startGame();
       break;
   }
 }
@@ -564,6 +590,9 @@ function update() {
     }
   }
   if (screen === REWIND_SCREEN) updateRewind();
+  // grow the end-of-run rainbow once the score screen is actually up (covers
+  // all three ways in: resurface, rewind finishing, resize abandoning a rewind)
+  if (screen === END_SCREEN) rainbowT += elapsedTime;
   // outside the screen guards: particles in flight when the run ends still
   // finish flying through the rewind and onto END_SCREEN instead of freezing.
   updateParticles();
@@ -653,6 +682,15 @@ function endGame(resurfaced) {
   score = SCORE_PER_DUST * dust + SCORE_PER_M * Math.round(tunnel / PX_PER_M);
   outcome = resurfaced;
   endReady = false;
+  endHeld = whichKeyDown();   // steering keys still down at the stall/resurface - refreshed through the rewind (see processInputs), so END_SCREEN knows what's "leftover" vs a fresh restart press
+
+  // END_SCREEN rainbow: foot at the tunnel mouth on a stall-out (the point
+  // updateRewind() hard-cuts the camera back to), or at the egress point on a
+  // resurface. Grow timer (rainbowT) is advanced per-frame in update() from
+  // the moment END_SCREEN is actually reached, so the rewind's ~1.1s doesn't
+  // eat the animation.
+  rainbowX = resurfaced ? drillWorld()[0] : trail[0];
+  rainbowT = 0;
 
   // close the trail at the exact stop position. The rewind camera walks this
   // polyline from the last point back to trail[0] (surface).
@@ -1027,15 +1065,19 @@ function render() {
       // drawn only when there was no rewind (resurface win, or a resize that
       // abandoned it) - it's still on screen in those cases.
       clearBuffer();
+      renderRainbow();
       renderDust();
       renderParticles();
       if (!rewound) {
         BUFFER_CTX.fillStyle = '#2255ee';
         BUFFER_CTX.fillRect(hero.x, hero.y, hero.w, hero.h);
       }
-      // one neutral headline - no win/lose split any more (the run just ends,
-      // see endGame()). outcome is still recorded for future share text.
-      renderText('well dug!', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 - 2 * HUD_LINE, ALIGN_CENTER, HUD_SCALE + 1);
+      // no win/lose split (the run just ends, see endGame()) - but a run that
+      // bagged no dust grew no rainbow, so nudge the player to collect next
+      // time. Both headlines are <= 9 chars at HUD_SCALE+1 (the CAMERA_WIDTH
+      // fit constraint, see the RENDER_SCALE comment). outcome is still
+      // recorded for future share text.
+      renderText(dust ? 'well dug!' : 'dry run!', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 - 2 * HUD_LINE, ALIGN_CENTER, HUD_SCALE + 1);
       // metric lines share a left edge (7-char label field), like the in-game
       // HUD - centre-aligning each line drifts the labels as the values change
       // width. mx roughly centres the block.
@@ -1085,6 +1127,35 @@ function renderDust() {
   DUST_LAYER_CTX.restore();
   DUST_LAYER_CTX.globalCompositeOperation = 'source-over';
   BUFFER_CTX.drawImage(DUST_LAYER, 0, 0, CAMERA_WIDTH, CAMERA_HEIGHT, cx, cy, CAMERA_WIDTH, CAMERA_HEIGHT);
+};
+
+// END_SCREEN: the sprouted rainbow (see the RAINBOW_* constants). A full
+// semicircle with its left foot on rainbowX, RAINBOW_BANDS concentric strokes
+// (red DUST_PALETTE[0] outermost), drawn outer-to-inner so each band's inner
+// edge covers the previous stroke's AA seam. Draws itself in from that left
+// foot over the apex to the far foot over RAINBOW_GROW seconds (ease-out).
+// Buffer space: ground line y = SURFACE_Y - mapOffset (paintCell's inverse).
+function renderRainbow() {
+  if (!dust) return;                                        // no dust collected -> no rainbow (see the 'dry run!' headline)
+  const k = dust / (dust + RAINBOW_DUST_HALF);              // 0..1, saturating: always grows with dust, never pins to max
+  const R = lerp(RAINBOW_R_MIN, RAINBOW_R_MAX, k);          // outer radius
+  const footBase = lerp(RAINBOW_FOOT_MIN, RAINBOW_FOOT_MAX, k);
+  const band = footBase / RAINBOW_BANDS;
+  const r0 = R - footBase;                                  // inner radius
+  // left foot straddles rainbowX: arc centre sits one mid-radius to its right,
+  // on the ground line, so the arc climbs up-and-right from the tunnel mouth.
+  const cx = rainbowX - mapOffsetX + R - footBase / 2;
+  const cy = SURFACE_Y - mapOffset;
+  const p = clamp(rainbowT / RAINBOW_GROW, 0, 1);
+  const sweep = (1 - (1 - p) ** 2) * Math.PI;               // ease-out, left foot -> apex -> right foot
+  BUFFER_CTX.lineCap = 'butt';
+  for (let i = 0; i < RAINBOW_BANDS; i++) {
+    BUFFER_CTX.strokeStyle = DUST_PALETTE[i];
+    BUFFER_CTX.lineWidth = band + 1;                        // +1 overlap kills hairline gaps
+    BUFFER_CTX.beginPath();
+    BUFFER_CTX.arc(cx, cy, r0 + (RAINBOW_BANDS - 0.5 - i) * band, Math.PI, Math.PI + sweep);
+    BUFFER_CTX.stroke();
+  }
 };
 
 // draw in-flight collection particles, easing (accelerating from rest) from

@@ -45,8 +45,8 @@ back to the surface with what you've got before you run out of momentum.**
 
 ## Run end / score
 
-**No-fail.** There is no lose state. The run ends — and a rainbow always
-sprouts — in either of two ways, and both are scored the same way:
+**No-fail.** There is no lose state. The run ends — and a rainbow sprouts if
+any dust was collected — in either of two ways, and both are scored the same way:
 
 - Momentum decays to zero while still underground (the drill stalls out
   wherever it is), or
@@ -61,11 +61,25 @@ edge is cutting undug ground, so re-running an old shaft doesn't pad it.
 Absolute `depth` is no longer scored or shown: both axes drill infinitely,
 so how deep you happen to be reads arbitrary. Both terms reward
 independently; `SCORE_PER_M` sits high enough that a wide sideways drill
-still scores, but dust is the denser reward. Dust carried also scales the
-rainbow's size. Resurfacing is not required to score; it just ends the run
-early with whatever momentum is left. Both end conditions show one neutral
-headline (`well dug!`) — no win/lose split. (This replaces the earlier
-bingo-fuel lose condition — see TODO.md "Won't do: Bingo-fuel warning".)
+still scores, but dust is the denser reward. Resurfacing is not required to
+score; it just ends the run early with whatever momentum is left. A run that
+collected dust shows the neutral headline `well dug!`; a run that collected
+none shows `dry run!` — a nudge to collect, since it also grew no rainbow.
+No win/lose split either way. (This replaces the earlier bingo-fuel lose
+condition — see TODO.md "Won't do: Bingo-fuel warning".)
+
+**Rainbow sprout.** On END_SCREEN a rainbow grows out of the tunnel mouth: a
+full semicircle with its **left foot on the ingress point** (`trail[0]`), or
+on the **egress point** for a resurface end. It draws itself in over
+~`RAINBOW_GROW` seconds (ease-out sweep, left foot → apex → far foot). Both
+the foot thickness (the stacked band width where it meets the ground) and the
+overall radius scale with **dust collected, not score** — dust is the whole
+point, so a long shaft that bagged nothing sprouts no rainbow at all. The
+dust→size curve *saturates* (`k = dust / (dust + RAINBOW_DUST_HALF)`): more
+dust is always a bigger rainbow, with diminishing returns, no hard cap where
+every real run pins to max. A big haul overflows the sky and clips off the
+top — fine by design. `RAINBOW_*` constants in game.js; `renderRainbow()`
+draws it (7 concentric strokes, `DUST_PALETTE`, red outermost).
 
 **Camera rewind.** When the run ends *underground* (momentum stalled out
 mid-dig), the camera walks the drilled path back up to the surface before the
@@ -79,8 +93,15 @@ replayed faithfully. A fresh key/tap — one that starts *during* the rewind —
 fast-forwards straight to the surface; a key still held from gameplay doesn't
 count (and releasing it costs nothing), so the player always sees the
 cutscene at least once. A **resurface** end skips the rewind entirely — the camera is
-already at the surface, and the rainbow will sprout from that egress point
+already at the surface, and the rainbow sprouts from that egress point
 rather than the original tunnel mouth.
+
+The END_SCREEN retry is gated so a steering key still held when the run ended
+(or one held to skip the rewind) doesn't restart instantly — but it also
+can't lock the retry out: restart on either a full release-then-press
+(`endReady`), or a press of any key that wasn't already held when the screen
+appeared (`endHeld`, snapshotted at game-over and kept current through the
+rewind).
 
 Dense dust tops momentum back up (`MOMENTUM.denseBoost` px/sec per dense
 cell dug — `digShaft()` clears several cells per tick, so entering a patch

@@ -101,12 +101,18 @@ for the reasoning behind each of these; this is just the sequencing.
          (re-running an old shaft doesn't pad it). Absolute `depth` dropped
          as the distance term (both axes infinite → arbitrary) and off the
          HUD, replaced by `shaft:` = `tunnel` in metres. END screen adds a
-         `score:` line. No win/lose headline split — both ends read
-         `well dug!`. Tuning (`SCORE_PER_DUST`/`SCORE_PER_M`) is playtest
-         bait. See DESIGN.md "Run end / score".
-      2. Rainbow in the sky. Camera fast-scrolls up to the surface; a rainbow
-         grows out of the tunnel mouth into the sky, its width proportional
-         to `score`.
+         `score:` line. No win/lose headline split — `well dug!`, or
+         `dry run!` when zero dust was collected. Tuning
+         (`SCORE_PER_DUST`/`SCORE_PER_M`) is playtest bait. See DESIGN.md
+         "Run end / score".
+      2. Rainbow in the sky. DONE — `renderRainbow()` grows a full semicircle
+         out of the tunnel mouth on END_SCREEN, left foot on the ingress
+         point (egress point on a resurface), drawing itself in over
+         `RAINBOW_GROW` (ease-out sweep). Foot thickness + radius scale with
+         DUST collected (not score — a dustless run grows nothing), on a
+         saturating curve `k = dust/(dust + RAINBOW_DUST_HALF)`. `RAINBOW_*`
+         constants are playtest bait (`RAINBOW_DUST_HALF`, `RAINBOW_FOOT_MAX`,
+         `RAINBOW_R_MAX`). See DESIGN.md "Run end / score — Rainbow sprout".
       3. Rainbow beam up the tunnel. PARTIALLY DONE — the trail + camera
          walk-back mechanism is in: `trail` (a breadcrumb polyline appended in
          `recordTrail()` every `TRAIL_STEP` of drill travel, world/underground
