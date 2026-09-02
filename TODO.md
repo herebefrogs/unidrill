@@ -65,11 +65,13 @@ as they land — this list stays scoped to open work.
 
 ## Later / revisit
 
-- [ ] Delete the camera-tuning debug overlay — the `DEBUG_CAMERA` flag and the
-      ring/crosshair draw block at the end of `render()` in game.js. **Only if
-      we're over the 13 KB budget at submission time.** As of the camera-tracking
-      commit there's ~40–50% budget headroom, so keep it for now — it's handy
-      for re-tuning the `CAMERA_*` constants.
+- [ ] Delete the debug overlays — the `DEBUG_CAMERA` flag + ring/crosshair
+      block and the `DEBUG_POINTER` flag + its branch of the D-pad draw block,
+      both at the end of `render()` in game.js. **Only if we're over the 13 KB
+      budget at submission time.** As of the camera-tracking commit there's
+      ~40–50% headroom, so keep them for now — handy for re-tuning the
+      `CAMERA_*` constants and the pointer `RAMP`/`DEAD`. (Keep the plain
+      base+knob D-pad overlay — that's the shipped control, not debug.)
 - [ ] Name the game **Errand of Iris** and build the light framing around it.
       Decided — replaces the "UniDrill Corp" working title (avoids the
       "unicorn"/"rainbow"/"prism" words every other entry will lean on).
@@ -97,11 +99,6 @@ as they land — this list stays scoped to open work.
       Rise", Bloomwright, Arcus, "Seven Below".
 - [ ] Create the title screen (currently skipped: boots straight into
       GAME_SCREEN, see game.js). Carries the Errand of Iris framing above.
-- [ ] Revisit pointer steering: direction changes feel abrupt right now,
-      because of the unusual pointer-direction logic in src/js/inputs/pointer.js
-      (built to work around a smartphone touch quirk - get the full context
-      from Jerome before changing it). Also add a visual on-screen D-pad for
-      touch (show the control, and the current drag direction).
 - [ ] Add gamepad support. There's prior art in Jerome's old veggie-ninja repo:
       https://github.com/herebefrogs/veggie-ninja/blob/master/src/js/gamepad.js
       (and possibly an older commit in gamejam-boilerplate's own history).

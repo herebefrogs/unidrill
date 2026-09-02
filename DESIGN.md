@@ -207,11 +207,19 @@ up whether descending or climbing, no inversion between the legs.
 - Keyboard: Arrow keys or WASD (plus Q for AZERTY-left), one per cardinal
   direction. Opposing keys cancel; adjacent keys combine to a diagonal.
   No key held → the drill coasts on its current heading.
-- Pointer (mobile): the target heading is whichever direction the finger is
-  currently dragging (drag direction only; magnitude ignored). The
-  direction-tracking logic in `src/js/inputs/pointer.js` works around a
-  touch quirk and is deliberately unusual — get the full context from
-  Jerome before changing it.
+- Pointer (mobile): a **floating D-pad**. On touch-down an anchor is dropped
+  at the contact point; the steering vector is `(finger − anchor)` per axis,
+  ramping linearly from 0 to ±1 over `RAMP` px (55). Push past that and the
+  anchor *trails* the finger, staying `RAMP` behind — so the pad follows your
+  thumb and a long drift never leaves it stranded. A small per-axis dead band
+  (`DEAD`, 8px) around the anchor reads as exactly 0, which also snaps a
+  mostly-vertical or mostly-horizontal drag to a pure cardinal. On a reversal
+  the finger has to travel back through the (trailed) anchor before that axis
+  flips sign — the D-pad feel players expect, and the fix for the old scheme's
+  instant, disorienting flip. `game.js` normalises the vector, so only its
+  angle reaches the heading math; the ramp magnitude drives the on-screen
+  overlay (base disc + knob on the finger; `DEBUG_POINTER` shows the full
+  model breakdown).
 
 **World edges.** The map is unbounded left, right and down — the drill can
 roam sideways as far as it likes, momentum decay is the only limit on a

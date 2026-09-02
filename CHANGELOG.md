@@ -197,10 +197,10 @@ Roughly in build order, oldest first.
 
 - [x] Steering model — absolute direction vs. bank. RESOLVED: playtesters
       confirmed the D-pad / absolute-heading model beats bank control — that
-      settles the model. Pointer-steering feel is still open (see TODO.md
-      Later/revisit: "Revisit pointer steering"). Turn-rate tuning
-      (`TURN_SPEED`) is also still open — see TODO.md Playtest. Original
-      notes kept for context:
+      settles the model. Pointer-steering feel was later rebuilt as a floating
+      D-pad (see "Revisit pointer steering" under Later/revisit below).
+      Turn-rate tuning (`TURN_SPEED`) is also still open — see TODO.md
+      Playtest. Original notes kept for context:
       Playtester said the
       keyboard bank-the-heading control "didn't feel natural"; they want
       Up/Down/Left/Right (combining to diagonals) that matches the mobile
@@ -225,3 +225,31 @@ Roughly in build order, oldest first.
       frame once deep), so it's tuned for that. HUD also got a pass: 3x font,
       top-left + left-aligned so labels don't shift, "momentum" relabelled
       "speed", loss text "tapped out!", dust-counter value pops on each tally.
+
+- [x] Revisit pointer steering. Original: "direction changes feel abrupt right
+      now, because of the unusual pointer-direction logic in
+      src/js/inputs/pointer.js (built to work around a smartphone touch quirk).
+      Also add a visual on-screen D-pad for touch (show the control, and the
+      current drag direction)."
+      RESOLVED — rebuilt as a **floating D-pad**. The old scheme tracked a
+      `[min,max]` sweep container per axis and, on any pull-back off the swept
+      extreme, snapped the steering to 0 and then inverted it as soon as the
+      finger crossed back — measured against the stale far extreme, so the
+      flip was near-instant and disorienting the moment you most needed
+      control. New model: an anchor dropped at the contact point; steering =
+      `(finger − anchor)` per axis, ramping linearly 0→±1 over `RAMP` (55px);
+      the anchor *trails* the finger to stay within `RAMP`, so the pad follows
+      your thumb and a long drift never strands it. A per-axis `DEAD` (8px)
+      zero band absorbs tremor and snaps a near-vertical/horizontal drag to a
+      pure cardinal. On a reversal the finger must travel back through the
+      trailed anchor before that axis flips — the D-pad feel players expect.
+      Dead ends along the way: (a) a separate saturation distance `RAMP` <
+      trail distance `PAD`, leaving an "outer band" where you're maxed and the
+      anchor hasn't moved — felt notchy on the pull-back, collapsed to one
+      radius (proportional edge to edge). (b) An analog reading — `game.js`
+      normalises the vector so only its angle matters; the ramp magnitude
+      only drives the overlay.
+      Visual: a translucent base disc (fixed, radius `RAMP·√2` — the farthest
+      the knob centre can sit from the anchor) + a knob disc on the finger.
+      `DEBUG_POINTER` (game.js, off) swaps in the full breakdown — pad ring,
+      per-axis dead bands, steering spoke, raw finger dot — for tuning.

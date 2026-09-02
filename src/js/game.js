@@ -1,5 +1,5 @@
 import { isKeyDown, anyKeyDown, isKeyUp, whichKeyDown } from './inputs/keyboard';
-import { isPointerDown, isPointerUp, pointerCanvasPosition, pointerDirection } from './inputs/pointer';
+import { isPointerDown, isPointerUp, pointerCanvasPosition, pointerDirection, pointerPad } from './inputs/pointer';
 import { isMobile } from './mobile';
 import { checkMonetization, isMonetizationEnabled } from './monetization';
 import { share } from './share';
@@ -153,6 +153,9 @@ const CAMERA_LOOKAHEAD_LAG = 0.22; // seconds; transient throw size AND how long
 // block in render() + this flag get deleted only if we're over budget at
 // submission.)
 const DEBUG_CAMERA = false;
+// draw the full floating-D-pad breakdown (pad ring, per-axis dead bands,
+// steering spoke, raw finger dot) instead of the plain base+knob. Tuning aid.
+const DEBUG_POINTER = false;
 // screen pixels per world pixel - the ONE knob for how big everything (dust
 // cells, HUD font, hero) renders. blit() stretches the viewport onto the
 // canvas by exactly this factor on every device, so a dust cell is always
@@ -1227,8 +1230,6 @@ function render() {
         const cx = DUST_COUNTER_X + (str.length * HUD_SCALE * (CHARSET_SIZE + 1) - HUD_SCALE) / 2;
         renderText(str, cx, DUST_COUNTER_Y - (s - HUD_SCALE) * CHARSET_SIZE / 2, ALIGN_CENTER, s);
       }
-      // uncomment to debug mobile input handlers
-      // renderDebugTouch();
       break;
     case REWIND_SCREEN:
       // just the world, scrolling past under the camera - no HUD, no text.
@@ -1284,6 +1285,49 @@ function render() {
     CTX.moveTo(mx - r - 12, my); CTX.lineTo(mx + r + 12, my);
     CTX.moveTo(mx, my - r - 12); CTX.lineTo(mx, my + r + 12);
     CTX.stroke();
+  }
+
+  // the floating D-pad overlay. Drawn in page px straight on the visible canvas
+  // (pointerPad is page-space; the canvas has no CSS size so 1 page px == 1
+  // canvas px). getBoundingClientRect places it exactly, inline-baseline gap
+  // and all. Plain form: a translucent base disc stretched from the anchor out
+  // to the finger + a knob disc on the finger (so the knob rides the base's
+  // edge). DEBUG_POINTER swaps in the full model breakdown:
+  //   - ring at RAMP = the pad radius (full deflection; anchor trails to here)
+  //   - faint perpendicular bands of half-width DEAD = per-axis dead zones;
+  //     drag along one and that axis snaps to pure vertical / horizontal
+  //   - spoke = the actual steering direction (post dead-zone, post-saturation)
+  //   - dot   = the raw finger position
+  if (screen === GAME_SCREEN && isPointerDown()) {
+    const [padX, padY, fingerX, fingerY, RAMP, DEAD] = pointerPad();
+    const b = c.getBoundingClientRect();
+    const ax = padX - b.left, ay = padY - b.top;
+    const fx = fingerX - b.left, fy = fingerY - b.top;
+    if (DEBUG_POINTER) {
+      const [vx, vy] = pointerDirection();
+      CTX.lineWidth = 2;
+      CTX.fillStyle = 'rgba(255,255,255,.12)';
+      CTX.fillRect(ax - DEAD, ay - RAMP, 2 * DEAD, 2 * RAMP);
+      CTX.fillRect(ax - RAMP, ay - DEAD, 2 * RAMP, 2 * DEAD);
+      CTX.strokeStyle = 'rgba(255,255,255,.55)';
+      CTX.beginPath(); CTX.arc(ax, ay, RAMP, 0, 2 * Math.PI); CTX.stroke();
+      const len = Math.hypot(vx, vy);
+      if (len) {
+        CTX.beginPath();
+        CTX.moveTo(ax, ay);
+        CTX.lineTo(ax + vx / len * RAMP, ay + vy / len * RAMP);
+        CTX.stroke();
+      }
+      CTX.fillStyle = 'rgba(255,255,255,.55)';
+      CTX.beginPath(); CTX.arc(fx, fy, 4, 0, 2 * Math.PI); CTX.fill();
+    } else {
+      // base: fixed size, radius = the farthest the knob centre (the finger)
+      // can sit from the anchor - RAMP on each axis, so RAMP*sqrt2 diagonally.
+      CTX.fillStyle = 'rgba(255,255,255,.25)';
+      CTX.beginPath(); CTX.arc(ax, ay, RAMP * Math.SQRT2, 0, 2 * Math.PI); CTX.fill();
+      CTX.fillStyle = 'rgba(255,255,255,.5)';    // knob on the finger
+      CTX.beginPath(); CTX.arc(fx, fy, RAMP * 0.4, 0, 2 * Math.PI); CTX.fill();
+    }
   }
 };
 
