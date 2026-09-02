@@ -787,6 +787,15 @@ function endGame(resurfaced) {
     rewindSpeed = clamp(pathLen / REWIND_DURATION, 600, CAMERA_WIDTH * 8);
     screen = REWIND_SCREEN;
   } else {
+    // no rewind cutscene on a clean resurface, but still flood the whole
+    // tunnel now (instantly) so the score screen shows the carved path
+    // glowing under the sprouting rainbow - same end state as the rewind,
+    // just without the walk-back. Only the near-surface stretch is on-buffer
+    // and visible; deeper fillDust stamps fall off-canvas harmlessly, the
+    // FILLED keys still land so a later repaint is correct.
+    for (let i = trail.length / 2 - 1; i > 0; i--) {
+      fillTrailSeg(trail[2 * i], trail[2 * i + 1], trail[2 * i - 2], trail[2 * i - 1]);
+    }
     screen = END_SCREEN;
   }
 }
@@ -1043,13 +1052,17 @@ function fillTrailSeg(ax, ay, bx, by) {
   for (let i = 0; i <= n; i++) fillDust(lerp(ax, bx, i / n), lerp(ay, by, i / n));
 }
 
-// mark the dug cells within the drill radius of world point (wx, wy) as
-// rainbow-filled - same disc scan as digShaft(), so FILLED is always a subset
-// of DUG (no bleed into rock on tight turns). Adds to FILLED and stamps
-// DUST_MASK now (buffer coords, as dig()); paintCell re-stamps from FILLED
-// when a strip pages in or renderMap() rebuilds the mask.
+// mark the dug cells near world point (wx, wy) as rainbow-filled. Gated on
+// DUG.has, so FILLED is always a strict subset of DUG - a generous radius only
+// ever fills real tunnel, never rock. It IS deliberately generous (a full
+// drill width, 2x digShaft's radius): the trail is a coarse subsample, so on a
+// rounded turn its straight chords cut inside the drilled arc and a
+// drill-radius scan would miss the cells on the bulge - leaving black pixels on
+// the outer edge of the bend. Adds to FILLED and stamps DUST_MASK now (buffer
+// coords, as dig()); paintCell re-stamps from FILLED when a strip pages in or
+// renderMap() rebuilds the mask.
 function fillDust(wx, wy) {
-  const r = hero.w / 2;
+  const r = hero.w;
   DUST_MASK_CTX.fillStyle = '#fff';
   for (let x = Math.floor((wx - r) / CELL_SIZE) * CELL_SIZE; x < wx + r; x += CELL_SIZE) {
     for (let y = Math.max(0, Math.floor((wy - r) / CELL_SIZE) * CELL_SIZE); y < wy + r; y += CELL_SIZE) {

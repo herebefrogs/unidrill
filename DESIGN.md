@@ -110,7 +110,13 @@ up", and it survives buffer paging and the `renderMap()` that fires on the
 REWIND→END_SCREEN handoff. The flood stays visible under the sprouting sky
 rainbow on END_SCREEN. It advances in `TRAIL_STEP` (4-cell) chunks; a rewind
 skip floods the whole remaining path in one frame. A resurface end (no
-rewind) floods nothing — the rainbow just sprouts at the egress point.
+rewind cutscene) floods the whole tunnel *instantly* in `endGame()` — same
+end state, so a clean exit still shows the carved path glowing under the
+sprouting rainbow. `fillDust` scans a generous radius (a full drill width,
+2× the dig radius) around each breadcrumb: the `trail` is coarse, so its
+straight chords cut inside the drilled arc on rounded turns and a
+tight-radius scan would leave black pixels on the outer edge of a bend — the
+`FILLED ⊆ DUG` gate means the wider scan only ever fills real tunnel.
 Considered and deferred: a distinct pattern for the beam (brighter / its own
 ramp / a travelling pulse) so it reads as a stream rather than tunnel-shaped
 dust — the shared treatment looked good enough to not spend tuning time on.
