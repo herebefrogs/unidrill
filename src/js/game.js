@@ -79,6 +79,7 @@ let rewindT;                                     // 0..1 progress from point rew
 let rewindSpeed;                                 // px/sec the rewind camera travels along the polyline (derived from total path length / REWIND_DURATION, clamped)
 let rewindSkip;                                   // a fresh press during the rewind sets this - updateRewind() then fast-forwards straight to the surface
 let rewindArmed;                                  // gate for rewindSkip: only true once all input has been released since the rewind began, so a key held over from gameplay doesn't skip the cutscene the player never saw
+let rewindFillI;                                  // trail POINT index the rainbow fill has reached, chasing rewindI down toward 0 (surface) - each segment it passes is stamped into FILLED / DUST_MASK once (see updateRewind's fill loop)
 
 let speak;
 
@@ -192,6 +193,12 @@ let mapOffsetX = 0;
 // Set persists across scrolling so backtracking through a dug shaft doesn't
 // regenerate solid material - see dig()/paintRow().
 const DUG = new Set();
+// subset of DUG keys the end-of-run rainbow has flooded back into: the camera
+// rewind marks each dug cell it passes (updateRewind -> fillDust), and
+// paintCell stamps DUST_MASK for a dug cell IFF it's in here - so the fill
+// survives paging and the renderMap() that jumpCameraTo() fires on the
+// REWIND -> END_SCREEN handoff. Cleared per run in startGame().
+const FILLED = new Set();
 // DUG key for the cell holding a world-x / underground-y point (Math.floor, not
 // | 0 - the two diverge for negative world-x, see CLAUDE.md). dig() takes
 // already-aligned coords so it builds its key directly instead.
@@ -368,6 +375,7 @@ function startGame() {
   cameraX = cameraY = 0;
   mapOffset = mapOffsetX = 0;
   DUG.clear();
+  FILLED.clear();
   hero = {
     x: CAMERA_WIDTH - HERO_W / 2,    // buffer centre (buffer is 2x CAMERA_WIDTH)
     y: SURFACE_Y - HERO_H,          // feet on the ground, not center
@@ -769,6 +777,7 @@ function endGame(resurfaced) {
       pathLen += Math.hypot(trail[i] - trail[i - 2], trail[i + 1] - trail[i - 1]);
     }
     rewindI = trail.length / 2 - 1;
+    rewindFillI = rewindI;   // rainbow fill starts at the deep end, drains up behind the camera
     rewindT = 0;
     rewindSkip = false;
     rewindArmed = false;
@@ -988,6 +997,15 @@ function updateRewind() {
     if (step < left) { rewindT += step / seg; step = 0; }
     else { step -= left; rewindI--; rewindT = 0; }
   }
+  // flood the rainbow up the tunnel behind the retreating camera: fill each
+  // trail segment the cursor has now cleared, once. rewindFillI chases rewindI
+  // down to 0 (the surface). On a skip the while loop above drops rewindI to 0
+  // in this same frame, so this drains every remaining segment at once.
+  while (rewindFillI > rewindI) {
+    fillTrailSeg(trail[2 * rewindFillI], trail[2 * rewindFillI + 1],
+                 trail[2 * rewindFillI - 2], trail[2 * rewindFillI - 1]);
+    rewindFillI--;
+  }
   if (rewindI === 0) {
     // cursor's at the surface, but the smoothed camera lags behind it - the
     // more the run looped, the further. On a natural finish let it ease in
@@ -1013,6 +1031,35 @@ function updateRewind() {
   const wy = lerp(trail[2 * rewindI + 1], trail[2 * j + 1], rewindT);
   // smooth: round off the corners where the drilled path looped back on itself
   centerCameraOn(wx - mapOffsetX, wy + SURFACE_Y - mapOffset, true);
+}
+
+// walk one trail segment (world-x / underground-y endpoints) in <=CELL_SIZE
+// steps, flooding the rainbow into the dug cells along it. The trail is a
+// coarse subsample (TRAIL_STEP), but the drill swept a full disc between
+// samples, so we re-scan that disc (fillDust) at every sub-step to catch the
+// whole capsule with no gaps.
+function fillTrailSeg(ax, ay, bx, by) {
+  const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / CELL_SIZE));
+  for (let i = 0; i <= n; i++) fillDust(lerp(ax, bx, i / n), lerp(ay, by, i / n));
+}
+
+// mark the dug cells within the drill radius of world point (wx, wy) as
+// rainbow-filled - same disc scan as digShaft(), so FILLED is always a subset
+// of DUG (no bleed into rock on tight turns). Adds to FILLED and stamps
+// DUST_MASK now (buffer coords, as dig()); paintCell re-stamps from FILLED
+// when a strip pages in or renderMap() rebuilds the mask.
+function fillDust(wx, wy) {
+  const r = hero.w / 2;
+  DUST_MASK_CTX.fillStyle = '#fff';
+  for (let x = Math.floor((wx - r) / CELL_SIZE) * CELL_SIZE; x < wx + r; x += CELL_SIZE) {
+    for (let y = Math.max(0, Math.floor((wy - r) / CELL_SIZE) * CELL_SIZE); y < wy + r; y += CELL_SIZE) {
+      const key = x + '_' + y;
+      if (DUG.has(key) && !FILLED.has(key) && Math.hypot(x + CELL_SIZE / 2 - wx, y + CELL_SIZE / 2 - wy) <= r) {
+        FILLED.add(key);
+        DUST_MASK_CTX.fillRect(x - mapOffsetX, y + SURFACE_Y - mapOffset, CELL_SIZE, CELL_SIZE);
+      }
+    }
+  }
 }
 
 // self-blit the MAP + DUST_MASK buffers by (dx, dy) px and patch only the
@@ -1328,10 +1375,13 @@ function renderEntity(entity, ctx = BUFFER_CTX) {
 function paintCell(x, y) {
   const wx = x + mapOffsetX;
   const underground = y - SURFACE_Y + mapOffset;
-  const dug = DUG.has(wx + '_' + underground);
+  const key = wx + '_' + underground;
+  const dug = DUG.has(key);
   MAP_CTX.fillStyle = underground < 0 ? SKY_COLOR : dug ? TUNNEL_COLOR : materialColor(sampleMaterial(wx, underground));
   MAP_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
-  if (underground >= 0 && !dug && sampleDust(wx, underground) !== DUST_NONE) {
+  // dust mask: virgin dust cells, OR dug cells the end-run rainbow has flooded
+  // (FILLED) - both get the same drifting-rainbow colouring in renderDust().
+  if (underground >= 0 && (dug ? FILLED.has(key) : sampleDust(wx, underground) !== DUST_NONE)) {
     DUST_MASK_CTX.fillRect(x, y, CELL_SIZE, CELL_SIZE);
   }
 }

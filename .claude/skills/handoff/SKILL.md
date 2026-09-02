@@ -7,8 +7,10 @@ description: "Write a paper trail for the next session before /clear or /compact
 
 The next session starts cold. Its only inputs are: `CLAUDE.md` (auto-loaded),
 `MEMORY.md` (auto-loaded index), `DESIGN.md` / `TODO.md` (read on request),
-recalled memory files, and `git log`. Everything you figured out this session
-that isn't in one of those is lost on `/clear`. This skill moves it there.
+recalled memory files, and `git log`. (`CHANGELOG.md` is deliberately *not*
+in that set — it's a dead archive of finished items, not startup reading.)
+Everything you figured out this session that isn't in one of those is lost
+on `/clear`. This skill moves it there.
 
 ## Steps
 
@@ -34,15 +36,20 @@ that isn't in one of those is lost on `/clear`. This skill moves it there.
    Update the matching existing file rather than duplicating; add the
    one-line pointer to `MEMORY.md`. Skip anything the repo already records.
 
-4. **`TODO.md`.** Tick finished items; if a finished item wasn't next in
-   line (worked out of order), move it to where it actually landed in the
-   sequence so the list keeps reading top-to-bottom as build order. Add
-   bugs/scope discovered — except a bug fixed within the same session it
-   was logged: delete it rather than ticking it, a resolved bug has no
-   ongoing value and the commit is the record (checked-off items elsewhere
-   in the list stay, since they document build order, not just status). If
-   an item is half-done, leave a sub-bullet with the concrete next step and
-   which files are mid-edit — not "continue where I left off".
+4. **`TODO.md` → `CHANGELOG.md`.** A finished item is *moved* out of
+   `TODO.md` into `CHANGELOG.md` (not ticked in place) — mark it `[x]`,
+   drop it under the matching `CHANGELOG.md` section (Build sequence /
+   Playtest / Later-revisit), keep its full text so the reasoning survives,
+   and fix any cross-ref that now dangles (a "see … below" that pointed at
+   another TODO item becomes "see TODO.md …"). `TODO.md` stays scoped to
+   open work. Before moving, check the item's hard-won rationale (dead
+   ends, "playtested, rejected") is already in `DESIGN.md` or this file's
+   Concepts-that-bite list; migrate anything that isn't. Add bugs/scope
+   discovered — except a bug fixed within the same session it was logged:
+   delete it rather than moving it, a resolved bug has no ongoing value and
+   the commit is the record. If an item is half-done, leave it in `TODO.md`
+   with a sub-bullet giving the concrete next step and which files are
+   mid-edit — not "continue where I left off".
 
 5. **`DESIGN.md`.** Per `CLAUDE.md`: if what got built contradicts it, edit
    the doc to describe the current design. No changelog notes.

@@ -2,148 +2,9 @@
 
 Ordered roughly by dependency, not necessarily by priority. See `DESIGN.md`
 for the reasoning behind each of these; this is just the sequencing.
+Completed items are moved to `CHANGELOG.md` (an archive, not read on startup)
+as they land — this list stays scoped to open work.
 
-- [x] Add a player at the center of the screen (temporary: a blue square,
-      real pixel art later). Temporary controls: up/down to trigger the
-      scrolling mechanism.
-- [x] Start tracking depth as the player moves up/down. Display it on the
-      side of the screen via the existing text routine.
-- [x] Add the scrolling buffer (shift-and-patch technique discussed in
-      chat: self-blit the MAP buffer by the accumulated depth delta, only
-      resample the newly exposed strip).
-- [x] Add the digging overlay (track which pixels have been dug). Temporary
-      control: always digs a straight vertical shaft — just enough to prove
-      backtracking doesn't lose dug-location history.
-- [x] Start tracking player velocity and angle: switch to real controls
-      (left/right banks the drill left/right, applied to angle).
-- [x] Handle the world edges. The map is unbounded left/right/down (see the
-      "horizontally unbounded map" item below) — there are no vertical walls.
-      The only edge is the surface, and it's soft: before `heroWentDeep`,
-      `processInputs()` forces a full dive on the y input when the drill
-      breaches >1 drill-height, eased through `TURN_SPEED`, so it porpoises
-      back under rather than flying into the sky.
-- [x] Horizontal camera panning → superseded by the unbounded map below.
-      The intermediate step was a fixed-width `PLAYFIELD_WIDTH` the camera
-      panned across with `hero.x` clamped to it; that (and `PLAYFIELD_MIN`,
-      the dead `updateCameraWindow()` / `CAMERA_WINDOW_*`) is all gone now.
-- [x] Horizontally unbounded map. The X axis got everything the Y axis had:
-      `mapOffsetX` (world-x of buffer col 0, X-twin of `mapOffset`), a `dx`
-      branch in `scrollMap()` + a `paintCol()` (both `paintRow`/`paintCol`
-      now build strips from a shared `paintCell()`), buffers back to 2×
-      viewport each way, `cameraX`/`hero.x` unbounded buffer coords that jump
-      on an X page (mirror model — `mapOffsetX` never touches the render read
-      path, only sampling/key sites). `followCamera()` pages either axis when
-      the camera drifts past a buffer edge; no `hero.x` clamp anywhere.
-      `DUG` keys, `sampleMaterial`/`sampleDust`, `dustColorAt`, `currentDrag`
-      and `renderDust`'s pattern anchor all take world-x = `bufferX +
-      mapOffsetX` (terrain.js was already `Math.floor`-clean for negative x).
-      `reanchorBuffer()` now cell-snaps its re-seat delta on BOTH axes (the
-      Y-only version left `mapOffset` fractional → dug rows repainted solid
-      after a page; latent bug, fixed here).
-- [x] Momentum / entropy / material drag. Fixed launch impulse
-      (`MOMENTUM` config in game.js), decays each frame by entropy + drag
-      from the material at the drill's leading edge (`MATERIAL_DRAG` in
-      terrain.js; dug tunnel & air use the cheaper values in `MOMENTUM`).
-      Win/lose evaluated in `moveHero()` from `depth` + momentum.
-- [x] Rainbow dust — distribution. `sampleDust(x, y)` in terrain.js: a
-      pass parallel to `sampleMaterial()` with its own microgrid
-      (`DUST_CELL`), returning NONE / SPARSE / DENSE per `CELL_SIZE` cell.
-      Patch centres jittered + boundary wobbled (two-harmonic, like the
-      rock blobs) so the outline is an irregular splat. SPARSE lit by a
-      quarter-grid dither mask (~25%), DENSE a solid fill; dense wins on
-      overlap. Temp debug tint baked into `paintRow`: DENSE `#e00`, SPARSE
-      `#f77`. Occurrence weights left for gameplay balancing once collect +
-      boost land. See DESIGN.md "Dust field".
-- [x] Rainbow dust — properties. Hook collection into `dig()`'s
-      `if (!DUG.has(key))` guard: call `sampleDust(x, undergroundY)` (dig()
-      already has both in underground space); if it's not NONE, `+1` the
-      dust counter; if DENSE, add a configurable amount to `hero.momentum`.
-      No `COLLECTED` set — collected = `DUG` ∩ `sampleDust`. Show the
-      counter in the HUD. NOTE: `digShaft()` clears many cells per tick, so
-      a per-cell DENSE boost is a big jolt on patch entry — ship per-cell,
-      revisit the per-tick-cap (already noted in DESIGN Open questions) if
-      it feels bad. Landing this retires the "no dust boosts implemented
-      yet" paragraph in DESIGN.md's Win/lose.
-- [x] Rainbow dust — visuals. (a) DONE — `DUST_MASK` buffer holds dust-cell
-      shapes (paged like MAP, stamped by paintRow, cleared by dig);
-      `renderDust()` colours the camera slice per frame by `source-in`-
-      masking a repeating diagonal rainbow (`DUST_PALETTE`, 7 hues,
-      `DUST_BAND` px/band) through it, composited between the MAP blit and
-      hero. Rainbow is anchored to underground position + a constant time
-      drift (`DUST_SPEED`), so it's decoupled from descent speed. Colour
-      tuning is a playtest item below. (b) DONE — collection particles: on
-      dig, spawn the cell as a two-stage particle (grow + radial push clear
-      of the tunnel, then ease-in flight to the HUD counter); the counter
-      ticks on arrival. See DESIGN.md "Graphics". (c) RESOLVED — dense-patch
-      boost feel. Hit-stop (freeze a few frames on patch entry) and a
-      "spool-up" (visible slowdown then catch-up) were both prototyped and
-      dropped — read as jank, not juice. What shipped: the dense boost may
-      overshoot the soft cap `MOMENTUM.max` up to `MOMENTUM.overMax` (`dig()`
-      clamps there), then an exponential bleed in `moveHero()`
-      (`MOMENTUM.overBleed`, ~0.25s) pulls the excess back to `max` on top
-      of normal drag — a surge that settles, not a new plateau. HUD tie-in:
-      the `speed:` value (number only, split off its label, centred on
-      itself) swells up to 2x scaled by how far into the `max`→`overMax`
-      band momentum sits. Tuned: max 600, overMax 800, overBleed 12. See
-      DESIGN.md Win/lose + Open questions.
-      (d) RESOLVED — counter ticks on particle arrival, juicier than dig-
-      time. Edge case handled: `endGame()` tallies any still-in-flight
-      particles' dust instantly (they keep animating on END_SCREEN, just
-      already counted), so a bingo-fuel/resurface stop never scores dust as
-      lost to the animation. Counter value also pops 2x-and-back on each
-      tick (`DUST_POP_DURATION`), undebounced — see the game-feel memory.
-- [ ] Sprout a rainbow on run end (momentum runs out OR resurface — both are
-      now wins, the run just ends, see "Won't do: bingo-fuel warning"). Three
-      parts:
-      1. Score. RESOLVED — `score = 10·dust + 2·metres` where *metres* is
-         `tunnel`, a virgin-shaft-carved px accumulator advanced in
-         `moveHero()` only when the drill's leading edge cuts undug ground
-         (re-running an old shaft doesn't pad it). Absolute `depth` dropped
-         as the distance term (both axes infinite → arbitrary) and off the
-         HUD, replaced by `shaft:` = `tunnel` in metres. END screen adds a
-         `score:` line. No win/lose headline split — `well dug!`, or
-         `dry run!` when zero dust was collected. Tuning
-         (`SCORE_PER_DUST`/`SCORE_PER_M`) is playtest bait. See DESIGN.md
-         "Run end / score".
-      2. Rainbow in the sky. DONE — `renderRainbow()` grows a full semicircle
-         out of the tunnel mouth on END_SCREEN, left foot on the ingress
-         point (egress point on a resurface), drawing itself in over
-         `RAINBOW_GROW` (ease-out sweep). Foot thickness + radius scale with
-         DUST collected (not score — a dustless run grows nothing), on a
-         saturating curve `k = dust/(dust + RAINBOW_DUST_HALF)`. `RAINBOW_*`
-         constants are playtest bait (`RAINBOW_DUST_HALF`, `RAINBOW_FOOT_MAX`,
-         `RAINBOW_R_MAX`). See DESIGN.md "Run end / score — Rainbow sprout".
-      3. Rainbow beam up the tunnel. PARTIALLY DONE — the trail + camera
-         walk-back mechanism is in: `trail` (a breadcrumb polyline appended in
-         `recordTrail()` every `TRAIL_STEP` of drill travel, world/underground
-         space), and `REWIND_SCREEN` / `updateRewind()` which lerps the camera
-         back down it to the surface over ~`REWIND_DURATION`, then hands to
-         END_SCREEN. A fresh press (key or pointer) fast-forwards to the
-         surface; input held over from gameplay doesn't count. A resurface end
-         skips the rewind (camera's already up there). STILL TO DO: the rainbow
-         stream visual itself — draw it along the trail behind the camera tip
-         as the rewind plays. See DESIGN.md "Run end / score — Camera rewind".
-- [x] Camera tracking: position-locking + spring-smoothing + projected focus.
-      RESOLVED. The camera is a (near-)critically-damped spring (`CAMERA_STIFFNESS`
-      ω, `CAMERA_DAMPING` ζ) chasing `hero_centre + CAMERA_LOOKAHEAD · cameraFocus`,
-      where `cameraFocus` is a lagged copy of the hero's velocity eased over
-      `CAMERA_LOOKAHEAD_LAG`. `CAMERA_LOOKAHEAD = 2ζ/ω` cancels the spring's
-      steady trailing lag once `cameraFocus` has caught up → the cruising hero
-      sits dead centre at any speed. A sudden speed change (dense-dust boost) or
-      heading change (hard turn) isn't in `cameraFocus` yet, so the look-ahead
-      term is briefly too short and the hero swings forward-of-centre toward the
-      debug ring; as `cameraFocus` catches up the centre-lock restores and the
-      spring reels the hero back on an ease-in/ease-out S-curve (ζ ≥ 1). Bigger
-      boost → bigger throw. `updateRewind()` reuses the bare spring (no
-      look-ahead) — its inertia skips the loopy-loops and catches the camera on
-      the next straight. `centerCameraOn()` runs the spring (120 Hz substepped,
-      stable + frame-rate independent); `followCamera()` adds the projected
-      focus; hard-lock callers (seat / `reanchorBuffer` / rewind skip) pass no
-      `smooth`, zero the spring velocity and snap the focus. Tuning (`CAMERA_*`
-      block in game.js) is playtest bait — ζ and `CAMERA_LOOKAHEAD` must move in
-      lockstep. `CAMERA_DEADZONE` + `DEBUG_CAMERA` draw a debug ring/crosshair,
-      off by default (see the Later/revisit note). See DESIGN.md "Graphics —
-      Camera".
 - [ ] Music and sound effects. SFX for: collecting a dust cell, the dust
       counter tally-tick, stalling out (momentum hits 0), and sprouting the
       end-run rainbow. Plus background music. Helpers in src/js/sound.js
@@ -175,30 +36,14 @@ for the reasoning behind each of these; this is just the sequencing.
 
 ## Playtest / gameplay balancing
 
-- [x] Steering model — absolute direction vs. bank. RESOLVED: playtesters
-      confirmed the D-pad / absolute-heading model beats bank control — that
-      settles the model. Pointer-steering feel is still open (see "Revisit
-      pointer steering" below). Original notes kept for context:
-      Playtester said the
-      keyboard bank-the-heading control "didn't feel natural"; they want
-      Up/Down/Left/Right (combining to diagonals) that matches the mobile
-      "head where you drag" feel. First cut (instant snap to one of 8
-      directions) was too snappy per the playtester — "I don't want it to
-      feel super laggy, but I don't want only horizontal/diagonal/vertical
-      either." Current state: keyboard + pointer both pick an ABSOLUTE
-      target heading, `hero.angle` eases toward it at `TURN_SPEED = 4*PI`
-      (~0.25s for a 180°, ~0.125s for 90°) — game.js `processInputs()`.
-      `TURN_SPEED` is the tuning knob. Still needs a feel check, and:
-      (1) tune the rate to taste; (2) an eased turn keeps a pull-up
-      commitment cost, but it's shorter now than the old ~1s bank — watch
-      whether the bingo-fuel tension DESIGN.md's Win/lose leans on ("only
-      safe line is a shallow pull-up") still holds. If this model sticks,
-      sync DESIGN.md Controls + fold in the pointer-smoothing TODO below.
-      Feel-check update (2026-08-29): curves between directions read nicer
-      now, but it still feels like "constantly fighting the arrows" and
-      patches get missed at `TURN_SPEED = 2*PI` — doubled to `4*PI`
-      (snappier per playtest); still needs another feel check at the new
-      rate.
+- [ ] TURN_SPEED feel-check at 4π. The absolute-heading steering model is
+      settled (playtesters picked it over bank control — see CHANGELOG.md),
+      but the turn rate isn't: at `TURN_SPEED = 2*PI` it felt like "constantly
+      fighting the arrows" and dust patches got missed, so it was doubled to
+      `4*PI` (~0.25s for 180°, ~0.125s for 90°). Needs a fresh feel check at
+      the new rate — and a check that the shorter turn still preserves the
+      pull-up commitment cost the run-end tension leans on. `TURN_SPEED` in
+      game.js `processInputs()` is the knob.
 
 - [ ] HUD feel-check. Now 3x font, metric units (speed ~19 m/s at launch,
       depth in m). Confirm the numbers read right in play and that the larger
@@ -220,14 +65,6 @@ for the reasoning behind each of these; this is just the sequencing.
 
 ## Later / revisit
 
-- [x] Depth (and speed) shown in metric. `PX_PER_M = 32` px/m, display-only —
-      the sim stays in pixels, the HUD divides for the readout (`depth` in m
-      to 1dp, `speed` in m/s). At this scale the drill is ~0.9 m, a dust cell
-      ~0.25 m, a straight sand dive bottoms out ~48 m, a there-and-back win
-      ~24 m. Scale only matters while the surface is visible (no reference
-      frame once deep), so it's tuned for that. HUD also got a pass: 3x font,
-      top-left + left-aligned so labels don't shift, "momentum" relabelled
-      "speed", loss text "tapped out!", dust-counter value pops on each tally.
 - [ ] Delete the camera-tuning debug overlay — the `DEBUG_CAMERA` flag and the
       ring/crosshair draw block at the end of `render()` in game.js. **Only if
       we're over the 13 KB budget at submission time.** As of the camera-tracking

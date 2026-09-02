@@ -1,11 +1,15 @@
  ## Orientation (read first — for a fresh session)
 
  `DESIGN.md` = current design (living doc, keep in sync). `TODO.md` =
- build sequencing + known bugs. Then the code that matters:
+ open build items + known bugs only. `CHANGELOG.md` = finished items,
+ moved out of `TODO.md` as they land — **don't read it on startup**, it's a
+ dead archive; `git log` is the real record, reach for `CHANGELOG.md` only
+ to recover the reasoning behind one specific finished decision. Then the
+ code that matters:
 
  | File | What's in it |
  |---|---|
- | `src/js/game.js` | **Everything gameplay**: RAF loop, the 4 screens (TITLE/GAME/REWIND/END), `hero` state + `moveHero()` + momentum/drag + win-lose + the overspeed bleed (`MOMENTUM.max`/`overMax`/`overBleed`), camera follow on both axes — a damped spring (`centerCameraOn` runs it, 120 Hz substepped) chasing a target that leads the hero by a *lagged* velocity (`followCamera` builds it: `cameraFocus`/`cameraVX`/`cameraVY` + the `CAMERA_*` block — ω/ζ/`LOOKAHEAD`/`LOOKAHEAD_LAG`/`DEADZONE`; ζ and `LOOKAHEAD` move in lockstep). Hard-lock callers (seat / `reanchorBuffer` / `jumpCameraTo` / rewind skip) pass no `smooth`. `DEBUG_CAMERA` draws a tuning ring, off. The end-of-run camera rewind (`trail`/`recordTrail`/`updateRewind`/`TRAIL_STEP`/`REWIND_DURATION` — walks the drilled breadcrumb path back to the surface; skipped on a resurface end), the END_SCREEN rainbow sprout (`renderRainbow`/`RAINBOW_*`/`rainbowX`/`rainbowT` — a semicircle grown from the tunnel mouth, size saturating on dust collected; no dust → no rainbow + `dry run!` headline), the retry gate (`endReady`/`endHeld` — a leftover held key can't lock or trigger the restart), viewport sizing (`RENDER_SCALE`/`resizeViewport`/`reanchorBuffer`), the `MAP` buffer paging in X and Y (`scrollMap`/`paintRow`/`paintCol`/`paintCell`/`clearBuffer`, `mapOffset`/`mapOffsetX`), digging (`digShaft`/`dig`/`DUG`), the dust rainbow layer (`DUST_MASK`/`DUST_GRADIENT`/`DUST_PATTERN`/`renderDust`), dust collection particles (`spawnDustParticle`/`updateParticles`/`renderParticles`), the HUD (`HUD_*`/`PX_PER_M`/`DUST_COUNTER_*`/`DUST_POP_DURATION`/`SPEED_VALUE_*`, drawn inline in `render()` — both the `dust:` and `speed:` values are drawn separately from their labels so only the number does the 2x pop), all rendering, input dispatch (`processInputs`). |
+ | `src/js/game.js` | **Everything gameplay**: RAF loop, the 4 screens (TITLE/GAME/REWIND/END), `hero` state + `moveHero()` + momentum/drag + win-lose + the overspeed bleed (`MOMENTUM.max`/`overMax`/`overBleed`), camera follow on both axes — a damped spring (`centerCameraOn` runs it, 120 Hz substepped) chasing a target that leads the hero by a *lagged* velocity (`followCamera` builds it: `cameraFocus`/`cameraVX`/`cameraVY` + the `CAMERA_*` block — ω/ζ/`LOOKAHEAD`/`LOOKAHEAD_LAG`/`DEADZONE`; ζ and `LOOKAHEAD` move in lockstep). Hard-lock callers (seat / `reanchorBuffer` / `jumpCameraTo` / rewind skip) pass no `smooth`. `DEBUG_CAMERA` draws a tuning ring, off. The end-of-run camera rewind (`trail`/`recordTrail`/`updateRewind`/`TRAIL_STEP`/`REWIND_DURATION` — walks the drilled breadcrumb path back to the surface; skipped on a resurface end) and the rainbow flood it drags up the tunnel behind it (`FILLED` ⊆ `DUG` / `fillTrailSeg`/`fillDust`/`rewindFillI` — dug cells the cursor has passed; `paintCell` stamps them into `DUST_MASK` so `renderDust` gives them the dust rainbow), the END_SCREEN rainbow sprout (`renderRainbow`/`RAINBOW_*`/`rainbowX`/`rainbowT` — a semicircle grown from the tunnel mouth, size saturating on dust collected; no dust → no rainbow + `dry run!` headline), the retry gate (`endReady`/`endHeld` — a leftover held key can't lock or trigger the restart), viewport sizing (`RENDER_SCALE`/`resizeViewport`/`reanchorBuffer`), the `MAP` buffer paging in X and Y (`scrollMap`/`paintRow`/`paintCol`/`paintCell`/`clearBuffer`, `mapOffset`/`mapOffsetX`), digging (`digShaft`/`dig`/`DUG`), the dust rainbow layer (`DUST_MASK`/`DUST_GRADIENT`/`DUST_PATTERN`/`renderDust`), dust collection particles (`spawnDustParticle`/`updateParticles`/`renderParticles`), the HUD (`HUD_*`/`PX_PER_M`/`DUST_COUNTER_*`/`DUST_POP_DURATION`/`SPEED_VALUE_*`, drawn inline in `render()` — both the `dust:` and `speed:` values are drawn separately from their labels so only the number does the 2x pop), all rendering, input dispatch (`processInputs`). |
  | `src/js/terrain.js` | Pure procedural terrain: `sampleMaterial(x,y)` (macro sections + rock-blob pass) and `sampleDust(x,y)` → `DUST_NONE`/`SPARSE`/`DENSE` (own microgrid, wobbly patches, quarter-grid dither for sparse). `CELL_SIZE`, materials `SAND`/`CLAY`, `MATERIAL_COLOR`, `MATERIAL_DRAG`. All keyed off the stateless `hash2D` — nothing stored, recomputed on demand. |
  | `src/js/inputs/keyboard.js`, `inputs/pointer.js` | Raw input capture only (see Game engine below). `pointer.js`'s drag-direction logic is deliberately unusual — ask before touching. |
  | `src/js/text.js` | Bitmap text (`renderText`, `CHARSET_SIZE`, `ALIGN_*`). `renderText`'s 5th arg is an integer `scale` (HUD draws at 3). |
@@ -95,7 +99,12 @@
    dust-cell *shapes* only (opaque white on transparent); `scrollMap()`
    self-blits it too (with `'copy'` — it's transparent-backed, so
    source-over would ghost), `paintRow()`/`paintCol()` stamp its strip,
-   `dig()` clears collected cells. `renderDust()` colours it per frame by
+   `dig()` clears collected cells. It also carries the end-of-run rainbow
+   flood: `paintCell()` stamps a *dug* cell into it iff the cell is in
+   `FILLED` (the rewind marks these as its camera passes), so the flooded
+   tunnel picks up the same rainbow as dust — re-derived from `FILLED` on
+   every repaint, so it survives paging and the `jumpCameraTo()`→`renderMap()`
+   on the REWIND→END handoff. `renderDust()` colours it per frame by
    `source-in`-masking a repeating diagonal rainbow tile (`DUST_PATTERN`)
    through it, offset by the camera's *world/underground* origin
    (`cx + mapOffsetX`, `cy - SURFACE_Y + mapOffset`) so the rainbow sticks to

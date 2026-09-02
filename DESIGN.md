@@ -84,17 +84,36 @@ draws it (7 concentric strokes, `DUST_PALETTE`, red outermost).
 **Camera rewind.** When the run ends *underground* (momentum stalled out
 mid-dig), the camera walks the drilled path back up to the surface before the
 score appears — a short cutscene that shows off the tunnel the player carved
-(and, later, the rainbow beamed up it). The path is recorded live as a coarse
-breadcrumb polyline (`trail`, a point every `TRAIL_STEP` of drill travel, in
-scroll-invariant world/underground space); `REWIND_SCREEN` lerps the camera
-back down it at a speed derived from the true path length so the walk always
-takes about `REWIND_DURATION` (~1.1s) regardless of route, loops and detours
-replayed faithfully. A fresh key/tap — one that starts *during* the rewind —
-fast-forwards straight to the surface; a key still held from gameplay doesn't
-count (and releasing it costs nothing), so the player always sees the
-cutscene at least once. A **resurface** end skips the rewind entirely — the camera is
-already at the surface, and the rainbow sprouts from that egress point
-rather than the original tunnel mouth.
+and floods it with the rainbow that's about to sprout. The path is recorded
+live as a coarse breadcrumb polyline (`trail`, a point every `TRAIL_STEP` of
+drill travel, in scroll-invariant world/underground space); `REWIND_SCREEN`
+lerps the camera back down it at a speed derived from the true path length so
+the walk always takes about `REWIND_DURATION` (~1.1s) regardless of route,
+loops and detours replayed faithfully. A fresh key/tap — one that starts
+*during* the rewind — fast-forwards straight to the surface; a key still held
+from gameplay doesn't count (and releasing it costs nothing), so the player
+always sees the cutscene at least once. A **resurface** end skips the rewind
+entirely — the camera is already at the surface, and the rainbow sprouts from
+that egress point rather than the original tunnel mouth.
+
+**Rainbow flood.** As the rewind camera retreats up the tunnel, the shaft
+fills with rainbow behind it — a rising front that follows the drilled route
+faithfully through loops and detours, so by the time the camera surfaces the
+whole tunnel is lit and it reads as the sky rainbow erupting out of a
+tunnel already full of it. Mechanism: `updateRewind()` marks every dug cell
+the cursor passes (`FILLED`, a subset of `DUG`; `fillTrailSeg`/`fillDust`
+re-scan the drill disc along each cleared segment so `FILLED ⊆ DUG` exactly,
+no bleed into rock). `paintCell()` stamps `DUST_MASK` for a dug cell iff it's
+in `FILLED`, so `renderDust()` colours the flooded tunnel with the **same
+drifting rainbow** as uncollected dust — thematically "your dust flowing back
+up", and it survives buffer paging and the `renderMap()` that fires on the
+REWIND→END_SCREEN handoff. The flood stays visible under the sprouting sky
+rainbow on END_SCREEN. It advances in `TRAIL_STEP` (4-cell) chunks; a rewind
+skip floods the whole remaining path in one frame. A resurface end (no
+rewind) floods nothing — the rainbow just sprouts at the egress point.
+Considered and deferred: a distinct pattern for the beam (brighter / its own
+ramp / a travelling pulse) so it reads as a stream rather than tunnel-shaped
+dust — the shared treatment looked good enough to not spend tuning time on.
 
 The END_SCREEN retry is gated so a steering key still held when the run ended
 (or one held to skip the rewind) doesn't restart instantly — but it also
@@ -173,9 +192,11 @@ TODO.md).
 
 ## Graphics
 
-2D side view, pixel art. Camera shake for impact. (Hit-stop on dense-patch
-entry was prototyped and dropped — a few frozen frames read as jank, not
-juice; the dense-boost surge now carries that beat instead, see Run end / score.)
+2D side view, pixel art. Camera shake for impact. (Two juice beats for
+dense-patch entry were prototyped and dropped — hit-stop, a few frozen
+frames, and a "spool-up", a visible slowdown then catch-up: both read as
+jank, not juice. The dense-boost surge now carries that beat instead, see
+Run end / score.)
 
 **Viewport.** One fixed knob, `RENDER_SCALE` (screen px per world px), sets
 how big everything renders — dust cell, HUD glyph, drill — and it is the
@@ -243,6 +264,9 @@ pattern offset by the camera's underground origin + time phase), and
 composites onto the backbuffer between the `MAP` blit and the hero — fixed
 cost regardless of how much dust is on screen, no per-cell work in the frame
 loop. Dust must stay *out* of `MAP` (rows freeze colour as the buffer pages).
+The end-of-run rainbow flood reuses this exact machinery — flooded tunnel
+cells (`FILLED`) get stamped into `DUST_MASK` too and pick up the same
+drifting rainbow (see "Rainbow flood" under Run end / score).
 
 **Collection animation.** When a dust cell is dug, it detaches in two
 stages. Stage 0 ("takeoff"): the cell doubles in size in place, pushed
