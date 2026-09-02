@@ -78,8 +78,37 @@ point, so a long shaft that bagged nothing sprouts no rainbow at all. The
 dust→size curve *saturates* (`k = dust / (dust + RAINBOW_DUST_HALF)`): more
 dust is always a bigger rainbow, with diminishing returns, no hard cap where
 every real run pins to max. A big haul overflows the sky and clips off the
-top — fine by design. `RAINBOW_*` constants in game.js; `renderRainbow()`
-draws it (7 concentric strokes, `DUST_PALETTE`, red outermost).
+top — fine by design. `RAINBOW_*` constants in game.js; `renderRainbow(footX)`
+draws it (`arcBands()` lays the 7 concentric strokes, `DUST_PALETTE`, red
+outermost).
+
+**Double rainbow (resurface easter egg).** "It's a double rainbow all the way
+across the sky." When a resurface end brings the drill up between
+`RAINBOW_DOUBLE_MIN` and `RAINBOW_DOUBLE_MAX` of a viewport-width away from
+where it went in, both holes get honoured with a bow each, **pinned by its
+near foot to one hole and growing toward the other**:
+
+- the **outer** bow (forward palette, red out) sprouts from the **egress**
+  hole. It's a touch wider than the hole span (`RAINBOW_DOUBLE_OVERSHOOT`), so
+  its far foot lands just *past* the ingress hole.
+- the **inner** bow (reversed palette, thinner, still drawn solid so it reads
+  as a real second bow) sprouts from the **ingress** hole. A touch narrower
+  than the span, so its far foot lands just *short* of the egress hole.
+
+They sweep in opposite directions and grow at the same rate, so on a wide
+double you watch two arcs race up from the two holes and close over the
+tunnel that links them underground. The whole thing mirrors cleanly whichever
+hole is on the left. The END_SCREEN camera — normally held wherever the drill
+surfaced — recentres on the midpoint so both near feet (the holes) frame up;
+the overshooting far feet can clip the edges on a wide span, which is fine.
+Both radii come from the **hole separation, not dust** (a longer sideways
+traverse earns grander bows); dust still drives band thickness (clamped so
+the stack fits the smaller inner arc). Outside the distance window it's the
+normal single arch at the egress: too close and the two feet don't read as a
+span, too far and the second hole won't frame up even recentred.
+`renderDoubleRainbow(egressX, ingressX)` — both bows via `arcBands`, whose
+`fromRight` flag picks the growth direction; `rainbowX` stays the egress,
+`rainbowX2` the ingress, `undefined` for a single.
 
 **Camera rewind.** When the run ends *underground* (momentum stalled out
 mid-dig), the camera walks the drilled path back up to the surface before the

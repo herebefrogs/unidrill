@@ -65,7 +65,8 @@ let dust;                                       // rainbow-dust cells collected 
 let dustPop;                                     // gameTime of the last dust tally; drives the HUD counter's pop-and-shrink (see DUST_POP_DURATION)
 let particles;                                  // in-flight collection particles (screen-space); each carries the one dust point it's still owed until it lands or endGame() tallies it early
 let score;                                       // final run score, computed once in endGame() (after the early dust tally) = SCORE_PER_DUST*dust + metres of tunnel; shown on END_SCREEN
-let rainbowX;                                     // world-x of the END_SCREEN rainbow's foot (ingress point, or egress point on a resurface); set in endGame()
+let rainbowX;                                     // world-x of the END_SCREEN rainbow's foot: ingress (tunnel mouth) on a stall, egress on a resurface. On a double it stays the egress - the hole the primary bow grows from (see rainbowX2); set in endGame()
+let rainbowX2;                                    // world-x of the ingress hole when a resurface earns the double rainbow (holes a viewport-fraction apart, see RAINBOW_DOUBLE_*) - concentric bows footed on both holes, primary growing from the egress + secondary from the ingress, toward each other; undefined for the normal single arch
 let rainbowT;                                     // seconds accrued on END_SCREEN, drives the rainbow's grow sweep (see RAINBOW_GROW); reset in endGame(), advanced in update()
 // breadcrumb polyline of the drill's path, flat [wx0, uy0, wx1, uy1, ...] in
 // world-x / underground-y (scroll-invariant, like DUG keys - NOT buffer space).
@@ -330,6 +331,17 @@ const RAINBOW_BANDS = DUST_PALETTE.length;
 const RAINBOW_DUST_HALF = 400;                        // dust at which the rainbow is half its max size; k = dust/(dust+this) (playtest knob - tune against the END screen's dust: line)
 const RAINBOW_R_MIN = 140, RAINBOW_R_MAX = 2000;     // outer radius at 0 dust / k->1 - kept well above FOOT_MAX so the inner radius (R - foot) stays positive; a big one clips off the top of the sky
 const RAINBOW_FOOT_MIN = 70, RAINBOW_FOOT_MAX = 640; // band-stack thickness at 0 dust / k->1 - MIN keeps the thinnest band (foot/7) legible (~10px); MAX lets a big haul bury the screen
+// double rainbow (resurface only): earn a 2nd arch - one span with a foot in
+// each surface breach + a nested reversed secondary - when the egress hole is
+// between these fractions of the viewport width from the ingress hole. Below
+// MIN the two feet don't read as a span; above MAX they won't both frame up
+// even after the END_SCREEN camera recentres between them. Outside -> the
+// normal single arch at the egress. Playtest knobs.
+const RAINBOW_DOUBLE_MIN = 0.25, RAINBOW_DOUBLE_MAX = 0.85;
+// how far the two bows miss the opposite hole, as a fraction of the half-span:
+// the outer overshoots its far hole by this, the inner falls this short - so
+// each bow stays visibly pinned to its own hole rather than both bridging.
+const RAINBOW_DOUBLE_OVERSHOOT = 0.15;
 const HUD_SCALE = 3;                                  // bitmap-font magnification for the in-game HUD lines
 const HUD_LINE = HUD_SCALE * CHARSET_SIZE + 4;        // px between stacked HUD lines
 const HUD_X = CHARSET_SIZE;                           // left-aligned HUD origin (labels stay put as values gain/lose digits)
@@ -759,6 +771,7 @@ function endGame(resurfaced) {
   // the moment END_SCREEN is actually reached, so the rewind's ~1.1s doesn't
   // eat the animation.
   rainbowX = resurfaced ? drillWorld()[0] : trail[0];
+  rainbowX2 = undefined;   // set below only if a resurface earns the double
   rainbowT = 0;
 
   // close the trail at the exact stop position. The rewind camera walks this
@@ -795,6 +808,16 @@ function endGame(resurfaced) {
     // FILLED keys still land so a later repaint is correct.
     for (let i = trail.length / 2 - 1; i > 0; i--) {
       fillTrailSeg(trail[2 * i], trail[2 * i + 1], trail[2 * i - 2], trail[2 * i - 1]);
+    }
+    // double rainbow: if the drill surfaced a viewport-fraction away from where
+    // it went in, sprout concentric bows footed on both holes (see
+    // renderDoubleRainbow) and recentre the held END_SCREEN camera on the
+    // midpoint so both feet frame up. rainbowX stays the egress; rainbowX2 = the
+    // ingress (renderDoubleRainbow reads both to know which bow grows from where).
+    const ingressX = trail[0], span = Math.abs(rainbowX - ingressX);
+    if (span > CAMERA_WIDTH * RAINBOW_DOUBLE_MIN && span < CAMERA_WIDTH * RAINBOW_DOUBLE_MAX) {
+      rainbowX2 = ingressX;
+      jumpCameraTo((rainbowX + ingressX) / 2, 0);
     }
     screen = END_SCREEN;
   }
@@ -1231,7 +1254,8 @@ function render() {
       // drawn only when there was no rewind (resurface win, or a resize that
       // abandoned it) - it's still on screen in those cases.
       clearBuffer();
-      renderRainbow();
+      if (rainbowX2 !== undefined) renderDoubleRainbow(rainbowX, rainbowX2);
+      else renderRainbow(rainbowX);
       renderDust();
       renderParticles();
       if (!rewound) {
@@ -1309,33 +1333,74 @@ function renderDust() {
   BUFFER_CTX.drawImage(DUST_LAYER, 0, 0, CAMERA_WIDTH, CAMERA_HEIGHT, cx, cy, CAMERA_WIDTH, CAMERA_HEIGHT);
 };
 
-// END_SCREEN: the sprouted rainbow (see the RAINBOW_* constants). A full
-// semicircle with its left foot on rainbowX, RAINBOW_BANDS concentric strokes
-// (red DUST_PALETTE[0] outermost), drawn outer-to-inner so each band's inner
-// edge covers the previous stroke's AA seam. Draws itself in from that left
-// foot over the apex to the far foot over RAINBOW_GROW seconds (ease-out).
-// Buffer space: ground line y = SURFACE_Y - mapOffset (paintCell's inverse).
-function renderRainbow() {
-  if (!dust) return;                                        // no dust collected -> no rainbow (see the 'dry run!' headline)
-  const k = dust / (dust + RAINBOW_DUST_HALF);              // 0..1, saturating: always grows with dust, never pins to max
-  const R = lerp(RAINBOW_R_MIN, RAINBOW_R_MAX, k);          // outer radius
-  const footBase = lerp(RAINBOW_FOOT_MIN, RAINBOW_FOOT_MAX, k);
-  const band = footBase / RAINBOW_BANDS;
-  const r0 = R - footBase;                                  // inner radius
-  // left foot straddles rainbowX: arc centre sits one mid-radius to its right,
-  // on the ground line, so the arc climbs up-and-right from the tunnel mouth.
-  const cx = rainbowX - mapOffsetX + R - footBase / 2;
-  const cy = SURFACE_Y - mapOffset;
-  const p = clamp(rainbowT / RAINBOW_GROW, 0, 1);
-  const sweep = (1 - (1 - p) ** 2) * Math.PI;               // ease-out, left foot -> apex -> right foot
+// END_SCREEN rainbow(s) (see the RAINBOW_* constants). Buffer space, ground
+// line y = SURFACE_Y - mapOffset (paintCell's inverse).
+//
+// arcBands lays one stack of RAINBOW_BANDS concentric strokes: centre (cx,cy),
+// outer radius rOut, total thickness `foot`, growing `sweep` rad from one foot
+// over the apex toward the other. Drawn outer-to-inner so each band covers the
+// previous stroke's AA seam. `flip` reverses the palette (violet out) for a
+// secondary bow. `fromRight` grows it from the right foot leftward instead of
+// the default left foot rightward (the double's two bows grow toward each
+// other - see renderDoubleRainbow).
+function arcBands(cx, cy, rOut, foot, sweep, flip, fromRight) {
+  const band = foot / RAINBOW_BANDS;
   BUFFER_CTX.lineCap = 'butt';
   for (let i = 0; i < RAINBOW_BANDS; i++) {
-    BUFFER_CTX.strokeStyle = DUST_PALETTE[i];
+    BUFFER_CTX.strokeStyle = DUST_PALETTE[flip ? RAINBOW_BANDS - 1 - i : i];
     BUFFER_CTX.lineWidth = band + 1;                        // +1 overlap kills hairline gaps
     BUFFER_CTX.beginPath();
-    BUFFER_CTX.arc(cx, cy, r0 + (RAINBOW_BANDS - 0.5 - i) * band, Math.PI, Math.PI + sweep);
+    const r = rOut - foot + (RAINBOW_BANDS - 0.5 - i) * band;
+    if (fromRight) BUFFER_CTX.arc(cx, cy, r, 0, -sweep, true);   // right foot (0) -> apex -> left
+    else BUFFER_CTX.arc(cx, cy, r, Math.PI, Math.PI + sweep);    // left foot (PI) -> apex -> right
     BUFFER_CTX.stroke();
   }
+};
+
+// the grow sweep (ease-out), off rainbowT - 0 at the anchored foot, PI at the
+// far foot.
+function rainbowSweep() {
+  return (1 - (1 - clamp(rainbowT / RAINBOW_GROW, 0, 1)) ** 2) * Math.PI;
+};
+
+// normal single arch: left foot straddling footX, radius scaling with dust
+// collected (saturating k) - dust is the whole point, so a dustless run
+// sprouts nothing (see the 'dry run!' headline). Centre sits one mid-radius
+// right of the foot on the ground line, so the arc climbs up-and-right.
+function renderRainbow(footX) {
+  if (!dust) return;
+  const k = dust / (dust + RAINBOW_DUST_HALF);
+  const R = lerp(RAINBOW_R_MIN, RAINBOW_R_MAX, k);
+  const foot = lerp(RAINBOW_FOOT_MIN, RAINBOW_FOOT_MAX, k);
+  arcBands(footX - mapOffsetX + R - foot / 2, SURFACE_Y - mapOffset, R, foot, rainbowSweep(), false, false);
+};
+
+// resurface double: two bows, each pinned by its near foot to one hole and
+// growing TOWARD the other so they race up and close over the tunnel.
+//   - the OUTER bow's near foot is on the EGRESS hole; slightly wider than the
+//     span (RAINBOW_DOUBLE_OVERSHOOT), so its far foot lands just past ingress
+//   - the INNER bow (reversed palette, thinner, drawn solid so it reads as a
+//     real second bow) has its near foot on the INGRESS hole; slightly narrower
+//     than the span, so its far foot lands just short of egress
+// Radii come from the hole separation, NOT dust (a longer sideways traverse
+// earns grander bows); dust drives band thickness (clamped so the stack fits
+// the smaller inner arc). Mirrors cleanly whichever hole is on the left.
+function renderDoubleRainbow(egressX, ingressX) {
+  if (!dust) return;
+  const k = dust / (dust + RAINBOW_DUST_HALF);
+  const cy = SURFACE_Y - mapOffset;
+  const half = Math.abs(egressX - ingressX) / 2;
+  const dir = egressX < ingressX ? 1 : -1;                  // from the egress hole toward the arch centre
+  const rO = half * (1 + RAINBOW_DOUBLE_OVERSHOOT);         // outer: overshoots the far hole
+  const rI = half * (1 - RAINBOW_DOUBLE_OVERSHOOT);         // inner: falls short of it
+  const foot = Math.min(lerp(RAINBOW_FOOT_MIN, RAINBOW_FOOT_MAX, k), rI * 0.5);
+  const fs = foot * 0.55;
+  const sweep = rainbowSweep();
+  const egressRight = egressX > ingressX;                   // near foot side of each bow
+  // outer centred one radius from the egress hole; grows from that foot
+  arcBands(egressX - mapOffsetX + dir * rO, cy, rO + foot / 2, foot, sweep, false, egressRight);
+  // inner centred one radius from the ingress hole; grows from that foot
+  arcBands(ingressX - mapOffsetX - dir * rI, cy, rI + fs / 2, fs, sweep, true, !egressRight);
 };
 
 // draw in-flight collection particles, easing (accelerating from rest) from
