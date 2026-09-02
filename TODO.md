@@ -70,17 +70,33 @@ as they land — this list stays scoped to open work.
       we're over the 13 KB budget at submission time.** As of the camera-tracking
       commit there's ~40–50% budget headroom, so keep it for now — it's handy
       for re-tuning the `CAMERA_*` constants.
-- [ ] Pick the game name. Avoid "unicorn" / "rainbow" / "prism" — every
-      other entry will lean on those. Front-runner: **Gusher** (the end-run
-      rainbow erupts out of the tunnel mouth like an oil gusher — names the
-      single most distinctive thing on screen, no backstory needed).
-      Runner-up: **Bloomshaft** (bloom + mineshaft). Also considered:
-      "Colours Shall Rise", "Bloomwright", "Arcus", "Seven Below". "UniDrill
-      Corp" is the throwaway working title.
+- [ ] Name the game **Errand of Iris** and build the light framing around it.
+      Decided — replaces the "UniDrill Corp" working title (avoids the
+      "unicorn"/"rainbow"/"prism" words every other entry will lean on).
+      Iris is the Greek goddess of the rainbow and messenger of the gods,
+      who travels *along* the rainbow — but nobody in-game needs to know
+      that; the framing is carried by two small in-game beats, not backstory:
+      - Title screen: a line or two setting up the errand — Iris has a
+        message to deliver, she can only travel by rainbow, build her one
+        from the ground up. The bigger the rainbow, the happier she is.
+      - End screen: after the sky rainbow finishes drawing itself in, Iris
+        walks it — on at the near foot, over the apex, off toward her
+        destination. How far she gets / how sprightly she looks scales with
+        the rainbow size (i.e. dust collected): a big haul carries her clean
+        over, a thin arc leaves her trudging. Zero dust → no rainbow, she
+        just waits at the tunnel mouth (what `dry run!` reacts to). Gets the
+        grander arc on the double-rainbow resurface. Render-only, a small
+        canvas figure in the same spirit as the player unicorn.
+      - The end headline becomes Iris's reaction to the rainbow, not a
+        neutral status — warm line scaled to the haul at the top, `dry run!`
+        at zero. (`well dug!` / `dry run!` are the current placeholders.)
+      Player is still the unicorn drill; Iris is only ever an NPC who shows
+      up at the end. When this lands, sync DESIGN.md — Premise, Run end /
+      score headline, and a new end-screen "Iris crossing" beat.
+      Other names considered and dropped: Gusher, Bloomshaft, "Colours Shall
+      Rise", Bloomwright, Arcus, "Seven Below".
 - [ ] Create the title screen (currently skipped: boots straight into
-      GAME_SCREEN, see game.js). Also: replace the end-screen loss text
-      "tapped out!" with "Well Drilled!" (no fail state any more — see
-      "Run end / score").
+      GAME_SCREEN, see game.js). Carries the Errand of Iris framing above.
 - [ ] Revisit pointer steering: direction changes feel abrupt right now,
       because of the unusual pointer-direction logic in src/js/inputs/pointer.js
       (built to work around a smartphone touch quirk - get the full context
