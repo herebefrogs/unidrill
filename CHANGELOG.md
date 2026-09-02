@@ -99,7 +99,8 @@ Roughly in build order, oldest first.
       already counted), so a bingo-fuel/resurface stop never scores dust as
       lost to the animation. Counter value also pops 2x-and-back on each
       tick (`DUST_POP_DURATION`), undebounced — see the game-feel memory.
-- [x] Sprout a rainbow on run end. All three parts landed.
+- [x] Sprout a rainbow on run end. All three parts landed, plus a
+      double-rainbow easter egg and a rewind-flow cleanup (parts 4 & 5).
       1. Score. RESOLVED — `score = 10·dust + 2·metres` where *metres* is
          `tunnel`, a virgin-shaft-carved px accumulator advanced in
          `moveHero()` only when the drill's leading edge cuts undug ground
@@ -112,7 +113,8 @@ Roughly in build order, oldest first.
          "Run end / score".
       2. Rainbow in the sky. DONE — `renderRainbow()` grows a full semicircle
          out of the tunnel mouth on END_SCREEN, left foot on the ingress
-         point (egress point on a resurface), drawing itself in over
+         point (see part 5 — the earlier "egress on a resurface" was folded
+         away when resurface got the rewind too), drawing itself in over
          `RAINBOW_GROW` (ease-out sweep). Foot thickness + radius scale with
          DUST collected (not score — a dustless run grows nothing), on a
          saturating curve `k = dust/(dust + RAINBOW_DUST_HALF)`. `RAINBOW_*`
@@ -130,11 +132,45 @@ Roughly in build order, oldest first.
          survives buffer paging + the `renderMap()` that `jumpCameraTo()`
          fires on the REWIND→END handoff (a live-only `DUST_MASK` stamp would
          be wiped there). Advances in `TRAIL_STEP` (4-cell) chunks behind the
-         camera; a rewind skip floods the whole remaining path in one frame;
-         a resurface end (no rewind) floods nothing. Considered and deferred:
-         a distinct pattern for the beam so it reads as a stream rather than
-         tunnel-shaped dust — the shared treatment looked good enough to skip
-         the tuning cost. See DESIGN.md "Run end / score — Rainbow flood".
+         camera; a rewind skip floods the whole remaining path in one frame.
+         Considered and deferred: a distinct pattern for the beam so it reads
+         as a stream rather than tunnel-shaped dust — the shared treatment
+         looked good enough to skip the tuning cost. See DESIGN.md "Run end /
+         score — Rainbow flood".
+      4. Double rainbow (resurface easter egg). DONE — "it's a double
+         rainbow all the way across the sky". A resurface that comes up
+         `RAINBOW_DOUBLE_MIN..MAX` of a viewport-width from where it went in
+         gets two bows instead of one, each pinned by its near foot to one
+         hole and growing toward the other: OUTER (forward palette) from the
+         egress hole, overshooting the ingress by `RAINBOW_DOUBLE_OVERSHOOT`;
+         INNER (reversed palette, thinner, still solid) from the ingress
+         hole, falling the same fraction short of egress. Opposite sweep
+         directions, same grow rate (`arcBands`'s `fromRight` flag), so the
+         two arcs race up and close over the tunnel. Mirrors cleanly for
+         egress-on-the-right. Radii from the hole gap, NOT dust (dust still
+         drives band thickness). `renderRainbow`'s band loop was extracted to
+         `arcBands(cx,cy,rOut,foot,sweep,flip,fromRight)`; `rainbowSweep()`
+         shared. `rainbowX` = ingress, `rainbowX2` = egress (set only for a
+         double). Dead ends the user steered away from: (a) two full
+         dust-scaled arches, one per hole — they overlap into mush; (b)
+         dropping the concentric/meme silhouette for a bare "double arch";
+         (c) a faded/ghost secondary — wanted it fully opaque. Design in
+         DESIGN.md "Run end / score — Double rainbow".
+      5. Rewind on resurface too. DONE — `endGame()` no longer branches on
+         `resurfaced`; every run end closes the trail and plays
+         `REWIND_SCREEN`. A resurface retraces the whole dive (egress →
+         down the tunnel → back to the ingress mouth), flooding
+         progressively, instead of the earlier instant fill. The single bow
+         now always foots on the ingress mouth (`rainbowX = trail[0]`) —
+         fixes a far resurface sprouting its arch off-screen. A double lands
+         the camera on the two-hole midpoint (`updateRewind`) so both bows
+         frame up. `rewound` is true for every end now; only a resize
+         abandoning the rewind clears it (and `rainbowX2`). Net: one code
+         path, and the resurface ending gets the same show-off-the-dig
+         cutscene. `fillDust`'s scan radius was also widened to a full drill
+         width (2× the dig radius) to close black pixels the coarse `trail`
+         left on the outer edge of rounded turns — the `FILLED ⊆ DUG` gate
+         keeps the wider scan from bleeding into rock.
 - [x] Camera tracking: position-locking + spring-smoothing + projected focus.
       RESOLVED. The camera is a (near-)critically-damped spring (`CAMERA_STIFFNESS`
       ω, `CAMERA_DAMPING` ζ) chasing `hero_centre + CAMERA_LOOKAHEAD · cameraFocus`,
