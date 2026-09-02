@@ -69,9 +69,11 @@ No win/lose split either way. (This replaces the earlier bingo-fuel lose
 condition — see TODO.md "Won't do: Bingo-fuel warning".)
 
 **Rainbow sprout.** On END_SCREEN a rainbow grows out of the tunnel mouth: a
-full semicircle with its **left foot on the ingress point** (`trail[0]`), or
-on the **egress point** for a resurface end. It draws itself in over
-~`RAINBOW_GROW` seconds (ease-out sweep, left foot → apex → far foot). Both
+full semicircle with its **left foot on the ingress point** (`trail[0]`) —
+where the camera rewind lands, for a stall and a plain resurface alike (a
+resurface far enough from its entry gets the *double*, below). It draws
+itself in over ~`RAINBOW_GROW` seconds (ease-out sweep, left foot → apex →
+far foot). Both
 the foot thickness (the stacked band width where it meets the ground) and the
 overall radius scale with **dust collected, not score** — dust is the whole
 point, so a long shaft that bagged nothing sprouts no rainbow at all. The
@@ -98,32 +100,34 @@ near foot to one hole and growing toward the other**:
 They sweep in opposite directions and grow at the same rate, so on a wide
 double you watch two arcs race up from the two holes and close over the
 tunnel that links them underground. The whole thing mirrors cleanly whichever
-hole is on the left. The END_SCREEN camera — normally held wherever the drill
-surfaced — recentres on the midpoint so both near feet (the holes) frame up;
-the overshooting far feet can clip the edges on a wide span, which is fine.
-Both radii come from the **hole separation, not dust** (a longer sideways
-traverse earns grander bows); dust still drives band thickness (clamped so
-the stack fits the smaller inner arc). Outside the distance window it's the
-normal single arch at the egress: too close and the two feet don't read as a
-span, too far and the second hole won't frame up even recentred.
-`renderDoubleRainbow(egressX, ingressX)` — both bows via `arcBands`, whose
-`fromRight` flag picks the growth direction; `rainbowX` stays the egress,
-`rainbowX2` the ingress, `undefined` for a single.
+hole is on the left. The camera rewind (below) plays as normal, but instead
+of landing on the ingress mouth it lands on the **two-hole midpoint** so both
+near feet frame up; the overshooting far feet can clip the edges on a wide
+span, which is fine. Both radii come from the **hole separation, not dust** (a
+longer sideways traverse earns grander bows); dust still drives band thickness
+(clamped so the stack fits the smaller inner arc). Outside the distance window
+it's the normal single arch at the ingress mouth: too close and the two feet
+don't read as a span, too far and the second hole won't frame up even
+recentred. `renderDoubleRainbow(egressX, ingressX)` — both bows via
+`arcBands`, whose `fromRight` flag picks the growth direction; `rainbowX` is
+the ingress, `rainbowX2` the egress (set only for a double, else `undefined`).
 
-**Camera rewind.** When the run ends *underground* (momentum stalled out
-mid-dig), the camera walks the drilled path back up to the surface before the
-score appears — a short cutscene that shows off the tunnel the player carved
-and floods it with the rainbow that's about to sprout. The path is recorded
-live as a coarse breadcrumb polyline (`trail`, a point every `TRAIL_STEP` of
-drill travel, in scroll-invariant world/underground space); `REWIND_SCREEN`
-lerps the camera back down it at a speed derived from the true path length so
-the walk always takes about `REWIND_DURATION` (~1.1s) regardless of route,
-loops and detours replayed faithfully. A fresh key/tap — one that starts
-*during* the rewind — fast-forwards straight to the surface; a key still held
-from gameplay doesn't count (and releasing it costs nothing), so the player
-always sees the cutscene at least once. A **resurface** end skips the rewind
-entirely — the camera is already at the surface, and the rainbow sprouts from
-that egress point rather than the original tunnel mouth.
+**Camera rewind.** However the run ends, the camera retraces the drilled path
+back to the ingress mouth before the score appears — a short cutscene that
+shows off the tunnel the player carved and floods it with the rainbow that's
+about to sprout. A **stall** rewinds from deep up to the surface; a
+**resurface** starts already at the surface (the egress hole) and retraces
+the whole dive — down through the tunnel and back up to the ingress mouth.
+The path is recorded live as a coarse breadcrumb polyline (`trail`, a point
+every `TRAIL_STEP` of drill travel, in scroll-invariant world/underground
+space); `REWIND_SCREEN` lerps the camera back down it at a speed derived from
+the true path length so the walk always takes about `REWIND_DURATION` (~1.1s)
+regardless of route, loops and detours replayed faithfully. A fresh key/tap —
+one that starts *during* the rewind — fast-forwards straight to the end; a key
+still held from gameplay doesn't count (and releasing it costs nothing), so
+the player always sees the cutscene at least once. It normally lands on the
+ingress mouth (`trail[0]`); a resurface that earned the double rainbow lands
+on the two-hole midpoint instead.
 
 **Rainbow flood.** As the rewind camera retreats up the tunnel, the shaft
 fills with rainbow behind it — a rising front that follows the drilled route
@@ -138,10 +142,9 @@ drifting rainbow** as uncollected dust — thematically "your dust flowing back
 up", and it survives buffer paging and the `renderMap()` that fires on the
 REWIND→END_SCREEN handoff. The flood stays visible under the sprouting sky
 rainbow on END_SCREEN. It advances in `TRAIL_STEP` (4-cell) chunks; a rewind
-skip floods the whole remaining path in one frame. A resurface end (no
-rewind cutscene) floods the whole tunnel *instantly* in `endGame()` — same
-end state, so a clean exit still shows the carved path glowing under the
-sprouting rainbow. `fillDust` scans a generous radius (a full drill width,
+skip floods the whole remaining path in one frame. A resurface runs the same
+rewind (it just starts at the egress hole, not deep), so its tunnel fills
+progressively too. `fillDust` scans a generous radius (a full drill width,
 2× the dig radius) around each breadcrumb: the `trail` is coarse, so its
 straight chords cut inside the drilled arc on rounded turns and a
 tight-radius scan would leave black pixels on the outer edge of a bend — the

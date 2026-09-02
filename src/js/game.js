@@ -65,8 +65,8 @@ let dust;                                       // rainbow-dust cells collected 
 let dustPop;                                     // gameTime of the last dust tally; drives the HUD counter's pop-and-shrink (see DUST_POP_DURATION)
 let particles;                                  // in-flight collection particles (screen-space); each carries the one dust point it's still owed until it lands or endGame() tallies it early
 let score;                                       // final run score, computed once in endGame() (after the early dust tally) = SCORE_PER_DUST*dust + metres of tunnel; shown on END_SCREEN
-let rainbowX;                                     // world-x of the END_SCREEN rainbow's foot: ingress (tunnel mouth) on a stall, egress on a resurface. On a double it stays the egress - the hole the primary bow grows from (see rainbowX2); set in endGame()
-let rainbowX2;                                    // world-x of the ingress hole when a resurface earns the double rainbow (holes a viewport-fraction apart, see RAINBOW_DOUBLE_*) - concentric bows footed on both holes, primary growing from the egress + secondary from the ingress, toward each other; undefined for the normal single arch
+let rainbowX;                                     // world-x of the END_SCREEN single bow's foot = the ingress mouth (trail[0]), where the camera rewind lands - same for a stall and a plain resurface. On a double it's the ingress side (inner bow foot); set in endGame()
+let rainbowX2;                                    // world-x of the EGRESS hole when a resurface earns the double rainbow (holes RAINBOW_DOUBLE_MIN..MAX of a viewport apart) - outer bow grows from here, inner from rainbowX, toward each other; the rewind then lands the camera on the (rainbowX+rainbowX2)/2 midpoint; undefined for the normal single arch
 let rainbowT;                                     // seconds accrued on END_SCREEN, drives the rainbow's grow sweep (see RAINBOW_GROW); reset in endGame(), advanced in update()
 // breadcrumb polyline of the drill's path, flat [wx0, uy0, wx1, uy1, ...] in
 // world-x / underground-y (scroll-invariant, like DUG keys - NOT buffer space).
@@ -74,7 +74,7 @@ let rainbowT;                                     // seconds accrued on END_SCRE
 // the drill has moved >= TRAIL_STEP from the last point, closed with the exact
 // stop position in endGame(). REWIND_SCREEN walks the camera back down it.
 let trail;
-let rewound;                                     // did this run's end play the camera rewind? true for an underground end, false for a resurface win (already at the surface) or a resize that abandoned it - END_SCREEN only draws the drill sprite when false
+let rewound;                                     // did this run's end play the camera rewind? true for every run end now (stall AND resurface both retrace the dig) - only a resize abandoning the rewind mid-play sets it false, and END_SCREEN draws the drill sprite in that one case
 let rewindI;                                     // index of the trail POINT the rewind camera is currently leaving, counting down to 0 (the surface)
 let rewindT;                                     // 0..1 progress from point rewindI toward point rewindI-1
 let rewindSpeed;                                 // px/sec the rewind camera travels along the polyline (derived from total path length / REWIND_DURATION, clamped)
@@ -765,62 +765,47 @@ function endGame(resurfaced) {
   endReady = false;
   endHeld = whichKeyDown();   // steering keys still down at the stall/resurface - refreshed through the rewind (see processInputs), so END_SCREEN knows what's "leftover" vs a fresh restart press
 
-  // END_SCREEN rainbow: foot at the tunnel mouth on a stall-out (the point
-  // updateRewind() hard-cuts the camera back to), or at the egress point on a
-  // resurface. Grow timer (rainbowT) is advanced per-frame in update() from
-  // the moment END_SCREEN is actually reached, so the rewind's ~1.1s doesn't
-  // eat the animation.
-  rainbowX = resurfaced ? drillWorld()[0] : trail[0];
-  rainbowX2 = undefined;   // set below only if a resurface earns the double
+  // Single bow: foot at the ingress mouth (trail[0]) - where the rewind lands
+  // and the bow sprouts, for a stall AND a plain resurface alike. Grow timer
+  // (rainbowT) is advanced per-frame in update() from the moment END_SCREEN is
+  // reached, so the rewind doesn't eat the animation.
+  rainbowX = trail[0];
+  rainbowX2 = undefined;   // set just below only if a resurface earns the double
   rainbowT = 0;
 
-  // close the trail at the exact stop position. The rewind camera walks this
-  // polyline from the last point back to trail[0] (surface).
+  // close the trail at the exact stop position, then rewind the camera back
+  // down it - the walk-back that shows off the dig and progressively floods the
+  // tunnel with rainbow (updateRewind / rewindFillI). BOTH endings get it: a
+  // stall rewinds from deep up to the surface; a resurface (already at the
+  // surface, at the egress hole) retraces the whole dive from egress back to
+  // the ingress mouth. Speed derived from true path length (loops and all) so
+  // it's ~REWIND_DURATION whatever the route.
   trail.push(...drillWorld());
-  // a resurface win already ends at the surface, camera and all - no rewind,
-  // the rainbow sprouts at the egress point. Every other end is underground:
-  // rewind the camera up the tunnel back to the surface (that walk-back is
-  // what shows off the dig, and later the rainbow beamed up it). Speed is
-  // derived from the true path length (loops and all), so it takes
-  // ~REWIND_DURATION whatever route it drilled.
-  rewound = !resurfaced;
-  if (rewound) {
-    let pathLen = 0;
-    for (let i = 2; i < trail.length; i += 2) {
-      pathLen += Math.hypot(trail[i] - trail[i - 2], trail[i + 1] - trail[i - 1]);
-    }
-    rewindI = trail.length / 2 - 1;
-    rewindFillI = rewindI;   // rainbow fill starts at the deep end, drains up behind the camera
-    rewindT = 0;
-    rewindSkip = false;
-    rewindArmed = false;
-    // aim for REWIND_DURATION, but never crawl, and never jump more than a
-    // half-buffer per frame (30fps worst case) or scrollMap's self-blit maths
-    // would run past the buffer edge.
-    rewindSpeed = clamp(pathLen / REWIND_DURATION, 600, CAMERA_WIDTH * 8);
-    screen = REWIND_SCREEN;
-  } else {
-    // no rewind cutscene on a clean resurface, but still flood the whole
-    // tunnel now (instantly) so the score screen shows the carved path
-    // glowing under the sprouting rainbow - same end state as the rewind,
-    // just without the walk-back. Only the near-surface stretch is on-buffer
-    // and visible; deeper fillDust stamps fall off-canvas harmlessly, the
-    // FILLED keys still land so a later repaint is correct.
-    for (let i = trail.length / 2 - 1; i > 0; i--) {
-      fillTrailSeg(trail[2 * i], trail[2 * i + 1], trail[2 * i - 2], trail[2 * i - 1]);
-    }
-    // double rainbow: if the drill surfaced a viewport-fraction away from where
-    // it went in, sprout concentric bows footed on both holes (see
-    // renderDoubleRainbow) and recentre the held END_SCREEN camera on the
-    // midpoint so both feet frame up. rainbowX stays the egress; rainbowX2 = the
-    // ingress (renderDoubleRainbow reads both to know which bow grows from where).
-    const ingressX = trail[0], span = Math.abs(rainbowX - ingressX);
-    if (span > CAMERA_WIDTH * RAINBOW_DOUBLE_MIN && span < CAMERA_WIDTH * RAINBOW_DOUBLE_MAX) {
-      rainbowX2 = ingressX;
-      jumpCameraTo((rainbowX + ingressX) / 2, 0);
-    }
-    screen = END_SCREEN;
+  // double rainbow: a resurface that came up between RAINBOW_DOUBLE_MIN and MAX
+  // of a viewport from where it went in earns a second bow. rainbowX2 = the
+  // egress hole (rainbowX stays the ingress); updateRewind then lands the
+  // camera on the two-hole midpoint, not the ingress mouth, so both bows frame
+  // up. See renderDoubleRainbow.
+  if (resurfaced) {
+    const egressX = trail[trail.length - 2];
+    const sep = Math.abs(egressX - trail[0]);
+    if (sep > CAMERA_WIDTH * RAINBOW_DOUBLE_MIN && sep < CAMERA_WIDTH * RAINBOW_DOUBLE_MAX) rainbowX2 = egressX;
   }
+  rewound = true;
+  let pathLen = 0;
+  for (let i = 2; i < trail.length; i += 2) {
+    pathLen += Math.hypot(trail[i] - trail[i - 2], trail[i + 1] - trail[i - 1]);
+  }
+  rewindI = trail.length / 2 - 1;
+  rewindFillI = rewindI;   // rainbow fill starts at the far end, drains up behind the camera
+  rewindT = 0;
+  rewindSkip = false;
+  rewindArmed = false;
+  // aim for REWIND_DURATION, but never crawl, and never jump more than a
+  // half-buffer per frame (30fps worst case) or scrollMap's self-blit maths
+  // would run past the buffer edge.
+  rewindSpeed = clamp(pathLen / REWIND_DURATION, 600, CAMERA_WIDTH * 8);
+  screen = REWIND_SCREEN;
 }
 
 // stamps a fixed-radius circle around the hero's center every frame (per
@@ -1041,11 +1026,14 @@ function updateRewind() {
   if (rewindI === 0) {
     // cursor's at the surface, but the smoothed camera lags behind it - the
     // more the run looped, the further. On a natural finish let it ease in
-    // until the tunnel mouth is within the dead zone before handing off, so
+    // until the hand-off point is within the dead zone before handing off, so
     // there's no jump cut into the score screen. On a skip, don't wait:
     // hard-cut there (the skip delta from deep underground can exceed what
-    // scrollMap can page).
-    const bx = trail[0] - mapOffsetX, by = trail[1] + SURFACE_Y - mapOffset;
+    // scrollMap can page). Hand-off point is the ingress mouth (trail[0]),
+    // or the two-hole midpoint when a resurface earned the double rainbow.
+    const hx = rainbowX2 === undefined ? trail[0] : (rainbowX + rainbowX2) / 2;
+    const hy = rainbowX2 === undefined ? trail[1] : 0;
+    const bx = hx - mapOffsetX, by = hy + SURFACE_Y - mapOffset;
     if (!rewindSkip &&
         Math.hypot(bx - CAMERA_WIDTH / 2 - cameraX, by - CAMERA_HEIGHT / 2 - cameraY) > CAMERA_DEADZONE) {
       centerCameraOn(bx, by, true);
@@ -1053,7 +1041,7 @@ function updateRewind() {
     }
     // reached the surface: hard-cut there and hand off. endReady is re-cleared
     // - time passed during the rewind.
-    jumpCameraTo(trail[0], trail[1]);
+    jumpCameraTo(hx, hy);
     endReady = false;
     screen = END_SCREEN;
     return;
@@ -1164,7 +1152,7 @@ function reanchorBuffer() {
   // re-seats the camera on the (deep) hero - resuming from there would feed
   // updateRewind() a buffer-busting jump. Just abandon the rewind and show the
   // score over wherever the hero is.
-  if (screen === REWIND_SCREEN) { screen = END_SCREEN; rewound = false; }
+  if (screen === REWIND_SCREEN) { screen = END_SCREEN; rewound = false; rainbowX2 = undefined; }
   const dx = Math.round((hero.x - MAP.width  / 2) / CELL_SIZE) * CELL_SIZE;
   const dy = Math.round((hero.y - MAP.height / 2) / CELL_SIZE) * CELL_SIZE;
   hero.x -= dx; mapOffsetX += dx;
@@ -1249,12 +1237,12 @@ function render() {
       renderParticles();
       break;
     case END_SCREEN:
-      // hold the world where the rewind left it (surface + tunnel mouth), or
-      // where the drill resurfaced, and overlay the score. The drill sprite is
-      // drawn only when there was no rewind (resurface win, or a resize that
-      // abandoned it) - it's still on screen in those cases.
+      // hold the world where the rewind left it (surface + tunnel mouth, or
+      // the two-hole midpoint on a double) and overlay the score. The drill
+      // sprite is only drawn in the one case a rewind didn't finish - a resize
+      // that abandoned it - where the drill is still on screen.
       clearBuffer();
-      if (rainbowX2 !== undefined) renderDoubleRainbow(rainbowX, rainbowX2);
+      if (rainbowX2 !== undefined) renderDoubleRainbow(rainbowX2, rainbowX);   // (egress, ingress)
       else renderRainbow(rainbowX);
       renderDust();
       renderParticles();
