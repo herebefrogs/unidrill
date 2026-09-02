@@ -1327,10 +1327,12 @@ function renderDust() {
 // arcBands lays one stack of RAINBOW_BANDS concentric strokes: centre (cx,cy),
 // outer radius rOut, total thickness `foot`, growing `sweep` rad from one foot
 // over the apex toward the other. Drawn outer-to-inner so each band covers the
-// previous stroke's AA seam. `flip` reverses the palette (violet out) for a
-// secondary bow. `fromRight` grows it from the right foot leftward instead of
-// the default left foot rightward (the double's two bows grow toward each
-// other - see renderDoubleRainbow).
+// previous stroke's AA seam. `flip` reverses the palette (violet outermost) -
+// used for the double's OUTER bow, matching a real secondary rainbow: its
+// colours run opposite the inner bow, so the two reds face each other across
+// the gap. `fromRight` grows it from the right foot leftward instead of the
+// default left foot rightward (the double's two bows grow toward each other -
+// see renderDoubleRainbow).
 function arcBands(cx, cy, rOut, foot, sweep, flip, fromRight) {
   const band = foot / RAINBOW_BANDS;
   BUFFER_CTX.lineCap = 'butt';
@@ -1367,9 +1369,11 @@ function renderRainbow(footX) {
 // growing TOWARD the other so they race up and close over the tunnel.
 //   - the OUTER bow's near foot is on the EGRESS hole; slightly wider than the
 //     span (RAINBOW_DOUBLE_OVERSHOOT), so its far foot lands just past ingress
-//   - the INNER bow (reversed palette, thinner, drawn solid so it reads as a
-//     real second bow) has its near foot on the INGRESS hole; slightly narrower
-//     than the span, so its far foot lands just short of egress
+//   - the INNER bow is the "primary": normal palette (red outermost), thinner,
+//     drawn solid so it reads as a distinct second bow. Its near foot is on the
+//     INGRESS hole; slightly narrower than the span, so its far foot lands just
+//     short of egress. The OUTER bow is the "secondary": reversed palette
+//     (violet outermost), so the two reds face each other across the gap.
 // Radii come from the hole separation, NOT dust (a longer sideways traverse
 // earns grander bows); dust drives band thickness (clamped so the stack fits
 // the smaller inner arc). Mirrors cleanly whichever hole is on the left.
@@ -1386,9 +1390,9 @@ function renderDoubleRainbow(egressX, ingressX) {
   const sweep = rainbowSweep();
   const egressRight = egressX > ingressX;                   // near foot side of each bow
   // outer centred one radius from the egress hole; grows from that foot
-  arcBands(egressX - mapOffsetX + dir * rO, cy, rO + foot / 2, foot, sweep, false, egressRight);
+  arcBands(egressX - mapOffsetX + dir * rO, cy, rO + foot / 2, foot, sweep, true, egressRight);
   // inner centred one radius from the ingress hole; grows from that foot
-  arcBands(ingressX - mapOffsetX - dir * rI, cy, rI + fs / 2, fs, sweep, true, !egressRight);
+  arcBands(ingressX - mapOffsetX - dir * rI, cy, rI + fs / 2, fs, sweep, false, !egressRight);
 };
 
 // draw in-flight collection particles, easing (accelerating from rest) from

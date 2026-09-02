@@ -90,12 +90,16 @@ across the sky." When a resurface end brings the drill up between
 where it went in, both holes get honoured with a bow each, **pinned by its
 near foot to one hole and growing toward the other**:
 
-- the **outer** bow (forward palette, red out) sprouts from the **egress**
-  hole. It's a touch wider than the hole span (`RAINBOW_DOUBLE_OVERSHOOT`), so
-  its far foot lands just *past* the ingress hole.
-- the **inner** bow (reversed palette, thinner, still drawn solid so it reads
-  as a real second bow) sprouts from the **ingress** hole. A touch narrower
-  than the span, so its far foot lands just *short* of the egress hole.
+- the **outer** bow (reversed palette, violet out — the "secondary") sprouts
+  from the **egress** hole. It's a touch wider than the hole span
+  (`RAINBOW_DOUBLE_OVERSHOOT`), so its far foot lands just *past* the ingress hole.
+- the **inner** bow (forward palette, red out — the "primary"; thinner, still
+  drawn solid so it reads as a real second bow) sprouts from the **ingress**
+  hole. A touch narrower than the span, so its far foot lands just *short* of
+  the egress hole.
+
+The two palettes run opposite so the reds face each other across the gap
+between the bows, like a real double rainbow.
 
 They sweep in opposite directions and grow at the same rate, so on a wide
 double you watch two arcs race up from the two holes and close over the
