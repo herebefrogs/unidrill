@@ -2,3 +2,4 @@ dist
 node_modules
 keys.json
 .DS_Store
+.claude/worktrees
