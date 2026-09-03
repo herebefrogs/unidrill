@@ -27,8 +27,10 @@ let screen = GAME_SCREEN; // TODO restore TITLE_SCREEN once GAME_SCREEN is furth
 // so they don't seem to move faster than when traveling vertically or horizontally
 const NORMALIZE_DIAGONAL = Math.cos(Math.PI / 4);
 
-const HERO_W = 28;                             // temporary blue square, real sprite later
+const HERO_W = 28;                             // collision AABB + drill radius (hero.w/2); the unicorn sprite is drawn rigidly around this, a few px of leg/horn spill is fine
 const HERO_H = 28;
+const UNICORN_ACCENT = '#a24bd6';             // horn + tail; everything else white
+const LEG_WIGGLE = 0.35;                       // radians of leg-phase advance per world px travelled - gait speeds up with momentum (see moveHero, hero.legPhase)
 // how fast the drill rotates toward its 8-direction steering target
 // (radians/sec). Finite so the heading eases into the new direction rather
 // than snapping to one of 8 discrete angles - 4*PI = a full 180 in ~0.25s,
@@ -217,6 +219,7 @@ hero = {
   velX: 0,
   velY: 0,
   momentum: MOMENTUM.initial,
+  legPhase: 0,                          // render-only: advanced by distance travelled in moveHero(), drives the leg wiggle
 };
 heroWentDeep = false;
 depth = 0;
@@ -400,6 +403,7 @@ function startGame() {
     velX: 0,
     velY: 0,
     momentum: MOMENTUM.initial,
+    legPhase: 0,
   };
   heroWentDeep = false;
   outcome = undefined;
@@ -736,6 +740,7 @@ function moveHero() {
   const moved = hero.momentum * elapsedTime;
   hero.x += hero.velX * moved;
   hero.y += hero.velY * moved;
+  hero.legPhase += moved * LEG_WIGGLE;   // gait cadence rides travel distance -> speed-proportional and pause-safe (no wall-clock term)
   // no horizontal clamp - the map is unbounded left/right; followCamera()
   // pages the buffer under the drill wherever it roams.
   depth = Math.max(0, Math.round(hero.y + hero.h - SURFACE_Y + mapOffset));
@@ -1209,8 +1214,7 @@ function render() {
       clearBuffer();
       renderDust();
       renderParticles();
-      BUFFER_CTX.fillStyle = '#2255ee';
-      BUFFER_CTX.fillRect(hero.x, hero.y, hero.w, hero.h);
+      drawHero();
       renderText('speed:', HUD_X, SPEED_VALUE_Y, ALIGN_LEFT, HUD_SCALE);
       // value drawn separately so only the number swells (2x and back) while
       // momentum sits in the overtorque band - scale tracks how far past `max`
@@ -1247,10 +1251,7 @@ function render() {
       else renderRainbow(rainbowX);
       renderDust();
       renderParticles();
-      if (!rewound) {
-        BUFFER_CTX.fillStyle = '#2255ee';
-        BUFFER_CTX.fillRect(hero.x, hero.y, hero.w, hero.h);
-      }
+      if (!rewound) drawHero();
       // no win/lose split (the run just ends, see endGame()) - but a run that
       // bagged no dust grew no rainbow, so nudge the player to collect next
       // time. Both headlines are <= 9 chars at HUD_SCALE+1 (the CAMERA_WIDTH
@@ -1465,6 +1466,49 @@ function renderParticles() {
     BUFFER_CTX.fillRect(Math.round(x - size / 2), Math.round(y - size / 2), size, size);
   }
 };
+
+// stylized unicorn drilling head-first along hero.angle - rects + a triangle
+// horn, drawn rigidly (no rag-doll yet). All white but the purple horn/tail.
+// The whole figure corkscrews with the heading (climbing = upside down, by
+// design); collision stays the plain HERO_W/H AABB, a few px of spill is fine.
+function drawHero() {
+  const ctx = BUFFER_CTX;
+  ctx.save();
+  ctx.translate(hero.x + hero.w / 2, hero.y + hero.h / 2);
+  ctx.rotate(hero.angle);               // +x = drill heading / horn / dig-probe direction
+  ctx.scale(1.35, 1.35);               // sprite slightly overfills the AABB - the resting silhouette just kisses the tunnel edge (feet ~15px vs the 14px radius), a hair of spill is fine
+
+  // legs first (behind the body): slim rects swinging fore/aft, the phase wave
+  // sweeping down the body reads as digging/swimming; cadence from hero.legPhase
+  ctx.fillStyle = '#fff';
+  const legX = [-9, -5, 2, 6];
+  for (let i = 0; i < 4; i++) {
+    ctx.save();
+    ctx.translate(legX[i], 4);
+    ctx.rotate(Math.sin(hero.legPhase + i * Math.PI / 2) * 0.5);
+    ctx.fillRect(-1.5, 0, 3, 7);
+    ctx.restore();
+  }
+
+  // tail - purple stub off the back, sits in the already-carved tunnel
+  ctx.fillStyle = UNICORN_ACCENT;
+  ctx.fillRect(-18, -5, 7, 5);
+
+  // body + head - white blocks
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(-12, -5, 20, 11);
+  ctx.fillRect(5, -8, 11, 11);
+
+  // horn / drill - purple triangle off the forehead, biting the ground ahead
+  ctx.fillStyle = UNICORN_ACCENT;
+  ctx.beginPath();
+  ctx.moveTo(14, -8);
+  ctx.lineTo(14, -1);
+  ctx.lineTo(25, -3.5);
+  ctx.fill();
+
+  ctx.restore();
+}
 
 function renderEntity(entity, ctx = BUFFER_CTX) {
   const sprite = ATLAS[entity.type][entity.action][entity.frame];
