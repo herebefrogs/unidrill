@@ -3,10 +3,9 @@ import { isPointerDown, isPointerUp, pointerCanvasPosition, pointerDirection, po
 import { isMobile } from './mobile';
 import { checkMonetization, isMonetizationEnabled } from './monetization';
 import { share } from './share';
-import { loadSongs, playSound, playSong, renderSong, playMusic, resumeAudio, suspendAudio, setVolume, MASTER_VOLUME } from './sound';
+import { loadSongs, playSound, playSong, renderSong, playMusic, stopMusic, resumeAudio, suspendAudio, setVolume, MASTER_VOLUME } from './sound';
 import { initSpeech } from './speech';
 import SONG_GAME from './song-game';
-import SONG_TITLE from './song-title';
 import { save, load } from './storage';
 import { ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, CHARSET_SIZE, renderText, renderBubble, textWidth, initTextBuffer, clearTextBuffer } from './text';
 import { clamp, getRandSeed, setRandSeed, loadImg, lerp } from './utils';
@@ -17,13 +16,12 @@ import TILESET from '../img/tileset.webp';
 
 // GAMEPLAY VARIABLES
 
-const LOAD_SCREEN = 0;      // black hold with one "press any key" line - exists only to catch the gesture that unlocks the AudioContext (autoplay policy), then -> TITLE_SCREEN
-const TITLE_SCREEN = 1;
-const GAME_SCREEN = 2;
-const REWIND_SCREEN = 3;   // run over: camera fast-walks the drilled path back up to the surface (see updateRewind), then -> END_SCREEN
-const END_SCREEN = 4;
-const HIGHSCORE_SCREEN = 5;   // reached from the TITLE_SCREEN menu, returns to it - not part of the main LOAD->...->END flow
-let screen = LOAD_SCREEN;
+const TITLE_SCREEN = 0;
+const GAME_SCREEN = 1;
+const REWIND_SCREEN = 2;   // run over: camera fast-walks the drilled path back up to the surface (see updateRewind), then -> END_SCREEN
+const END_SCREEN = 3;
+const HIGHSCORE_SCREEN = 4;   // reached from the TITLE_SCREEN menu, returns to it - not part of the main TITLE->...->END flow
+let screen = TITLE_SCREEN;
 
 // factor by which to reduce both velX and velY when player moving diagonally
 // so they don't seem to move faster than when traveling vertically or horizontally
@@ -89,21 +87,26 @@ let rewindFillI;                                  // trail POINT index the rainb
 
 let speak;
 
-// Background music. Two tracks rendered to AudioBuffers at load (renderSong
-// blocks ~40ms/channel): SONG_GAME under GAME + REWIND, SONG_TITLE under
-// LOAD + TITLE + END. musicUnlocked flips on the first input gesture (autoplay
-// needs one); until then updateMusic() is inert. musicBuffer is whatever's
-// looping, so a screen change only restarts playback when the track differs.
-let musicGame, musicTitle, musicBuffer;
+// Background music. One track (SONG_GAME) rendered to an AudioBuffer at load
+// (renderSong blocks ~40ms/channel), playing under GAME + REWIND + END - the
+// title screen is silent. musicUnlocked flips on the first input gesture
+// (autoplay needs one, and TITLE's own Start press supplies it - see
+// unlockMusic); until then updateMusic() is inert. musicBuffer tracks what's
+// currently looping (or undefined) so a screen change only touches playback
+// when it actually needs to start or stop.
+let musicGame, musicBuffer;
 let musicUnlocked;
 let volumePct = MASTER_VOLUME * 100;             // M cycles it (processInputs), or the title menu's Music item; see cycleVolume()
 
 function updateMusic() {
   if (!musicUnlocked) return;
-  const want = screen === GAME_SCREEN || screen === REWIND_SCREEN ? musicGame : musicTitle;
+  const want = screen === GAME_SCREEN || screen === REWIND_SCREEN || screen === END_SCREEN ? musicGame : undefined;
   if (want && want !== musicBuffer) {
     playMusic(want);
     musicBuffer = want;
+  } else if (!want && musicBuffer) {
+    stopMusic();
+    musicBuffer = undefined;
   }
 }
 
@@ -441,8 +444,8 @@ function pickSpawnX() {
 
 // Seat the world on the clay-free spawn column: hero buffer-centred, mapOffsetX
 // carrying its world-x, camera hard-locked on it. Shared by startGame() and the
-// boot title backdrop (onload / a resize on LOAD|TITLE) so LOAD/TITLE -> GAME
-// shows one continuous frame - without it the title sits on the raw 0,0 column,
+// boot title backdrop (onload / a resize on TITLE) so TITLE -> GAME shows one
+// continuous frame - without it the title sits on the raw 0,0 column,
 // which may be rock, and the drill visibly jumps when startGame() walks clear.
 function seatSpawn() {
   cameraX = cameraY = 0;
@@ -648,7 +651,7 @@ const pointerViewportPosition = () => {
 // triggers it). Only 2 items for now - see TODO.md's options-panel item for
 // what else lands here later.
 let titleIndex = 0;
-let titleArmed = false;   // see the LOAD-gate-holdover guard in processInputs()
+let titleArmed = false;   // release-then-fresh-press gate so a key/tap held over from reaching TITLE_SCREEN (e.g. backing out of HIGHSCORE_SCREEN) doesn't instantly fire the menu item under the cursor - see processInputs()
 const SEED_LABEL_SCALE = 1.5;   // small corner credit line, not a menu item - see the TITLE_SCREEN render() case
 function titleMenuItems() {
   return [
@@ -759,7 +762,7 @@ function titleJumpPose() {
 // jump animation from there. A tap elsewhere, or any other key, also returns
 // to the title menu (on whatever seed was already active). highscoreReady is
 // the same "wait for a full release before a fresh
-// press counts" gate as endReady/bootReady, needed because Enter/tap
+// press counts" gate as endReady/titleArmed, needed because Enter/tap
 // selecting the menu item is often still held down on the very first
 // HIGHSCORE_SCREEN frame.
 let highscoreReady;
@@ -848,26 +851,6 @@ function titleBubbleLayout() {
   return { x, y: cy - h / 2, w, h, textX: x + w / 2 };
 }
 
-// LOAD is a click-through gate (any key/tap passes it). A key still held from
-// the press that passed it must not fall straight through to whatever's next,
-// so each pass snapshots what's down (bootHeld) and only a key outside that
-// snapshot - or a fresh press after everything's been released (bootReady) -
-// counts. isPointerUp() already consumes the press, so the pointer path needs
-// no extra guard. (TITLE is a real menu now, guarded separately - see
-// titleArmed in processInputs().)
-let bootHeld = [];
-let bootReady;
-function bootGatePassed() {
-  if (!anyKeyDown() && !isPointerDown()) bootReady = true;
-  const fresh = whichKeyDown().some(k => !bootHeld.includes(k));
-  if ((bootReady || fresh) && (anyKeyDown() || isPointerUp())) {
-    bootReady = false;
-    bootHeld = whichKeyDown();
-    return true;
-  }
-  return false;
-}
-
 function processInputs() {
   // volume step, every screen (also the title menu's Music item). isKeyUp
   // consumes KeyM on the frame it's pressed (it releases whatever's down), so
@@ -875,15 +858,12 @@ function processInputs() {
   if (isKeyUp('KeyM')) cycleVolume();
 
   switch (screen) {
-    case LOAD_SCREEN:
-      if (bootGatePassed()) screen = TITLE_SCREEN;
-      break;
     case TITLE_SCREEN: {
       if (titleJumping) break;   // hopping to the game-start pose - see updateTitleJump(); menu input is moot
-      // the LOAD gate accepts *any* key/tap and doesn't consume it (see
-      // bootGatePassed), so e.g. an Enter press that passed LOAD is still
-      // down here - wait for a full release before the menu reacts, or that
-      // same Enter would instantly fire "Start" and skip the menu entirely.
+      // a key/tap held over from reaching this screen (e.g. backing out of
+      // HIGHSCORE_SCREEN) must not fall straight through to whatever menu
+      // item the cursor happens to sit on - wait for a full release before
+      // the menu reacts (see titleArmed).
       if (!anyKeyDown() && !isPointerDown()) titleArmed = true;
       if (!titleArmed) break;
       const items = titleMenuLayout();
@@ -977,7 +957,7 @@ function processInputs() {
       if ((endReady || freshPress) && (anyKeyDown() || isPointerUp())) startGame();
       break;
     case HIGHSCORE_SCREEN: {
-      // same release-then-fresh-press gate as bootGatePassed/endReady (see
+      // same release-then-fresh-press gate as titleArmed/endReady (see
       // highscoreReady above).
       if (!anyKeyDown() && !isPointerDown()) highscoreReady = true;
       if (!highscoreReady) break;
@@ -1594,18 +1574,6 @@ function render() {
   clearTextBuffer();
 
   switch (screen) {
-    case LOAD_SCREEN:
-      // pure black - just the gesture catcher. Fill the exact rect blit() reads
-      // (MAP isn't copied here, so clearBuffer() would leave stale pixels).
-      BUFFER_CTX.fillStyle = '#000';
-      BUFFER_CTX.fillRect(Math.floor(cameraX), Math.floor(cameraY), CAMERA_WIDTH + 1, CAMERA_HEIGHT + 1);
-      {
-        const S = 3, lh = S * CHARSET_SIZE * 2;                    // scale, line advance
-        const top = CAMERA_HEIGHT / 2 - (lh + S * CHARSET_SIZE) / 2;   // block centred on the middle
-        renderText('Loading complete', CAMERA_WIDTH / 2, top, ALIGN_CENTER, S);
-        renderText(isMobile ? 'Tap to continue' : 'Press any key', CAMERA_WIDTH / 2, top + lh, ALIGN_CENTER, S);
-      }
-      break;
     case TITLE_SCREEN:
       clearBuffer();
       renderDust();   // the underground dust patches near the spawn column - what Iris's bubble is asking for
@@ -2098,18 +2066,16 @@ onload = async (e) => {
   // speak = await initSpeech();
   renderMap();
 
-  // Pre-render both tracks to buffers. GAME first (needed the moment play
-  // starts); TITLE deferred a tick so its ~90ms doesn't stack onto the same
-  // frame - it's not needed until the first run ends.
   musicGame = renderSong(SONG_GAME);
-  setTimeout(() => { musicTitle = renderSong(SONG_TITLE); });
 
   toggleLoop(true);
 };
 
 // Autoplay is blocked until a gesture: unlock the context on the first key or
-// pointer press, then let updateMusic() start the track for the live screen.
-// Recording an input isn't gameplay state, so this belongs in a listener.
+// pointer press - in practice the press that fires TITLE_SCREEN's Start -
+// then let updateMusic() start the track for the live screen once it lands
+// on GAME_SCREEN. Recording an input isn't gameplay state, so this belongs
+// in a listener.
 const unlockMusic = () => {
   musicUnlocked = true;
   resumeAudio();

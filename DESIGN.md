@@ -267,8 +267,10 @@ frames, and a "spool-up", a visible slowdown then catch-up: both read as
 jank, not juice. The dense-boost surge now carries that beat instead, see
 Run end / score.)
 
-**Text.** All on-screen text is the **Impact** system font (with a condensed
-fallback stack), white with a black round-joined `strokeText` casing under
+**Text.** All on-screen text is the **Impact** system font — ships by default
+on Windows and macOS — falling back to **Roboto** (Android) then **San
+Francisco** (iOS/-apple-system) on platforms without it, white with a black
+round-joined `strokeText` casing under
 the fill so it stays legible over any background — no backing rect. Costs no
 bytes and no asset load. `text.js` renders it into an offscreen buffer that
 composites over the frame; `renderText(msg, x, y, align, scale)` sizes the
@@ -382,17 +384,18 @@ separation for parallax.
 
 ## Screens
 
-Boot flow is `LOAD → TITLE → GAME → REWIND → END`, then `END → GAME` on retry
-(no return to the title). `HIGHSCORE` branches off `TITLE` and returns to it —
-not part of that main chain. `LOAD` is a black screen with a `Loading
-complete` / `Press any key` (`Tap to continue` on mobile) line — it exists
-only to catch the first input gesture, which is what unlocks the Web Audio
-context (browsers block autoplay until then). Both `LOAD` and the title
-menu's first arming are click-through gates: `bootGatePassed()`/`titleArmed`
-snapshot the keys held when a gate is passed so a key still down doesn't fall
-straight through the next screen (the pointer path self-consumes and needs no
-guard). The `END` retry and `HIGHSCORE` have their own equivalent gates
-(`endReady`/`endHeld`, `highscoreReady`; see Run end).
+Boot flow is `TITLE → GAME → REWIND → END`, then `END → GAME` on retry (no
+return to the title). `HIGHSCORE` branches off `TITLE` and returns to it —
+not part of that main chain. The game opens directly on `TITLE`; there's no
+separate boot/loading screen. The title menu's first arming is a
+click-through gate: `titleArmed` snapshots the keys held when the screen is
+reached (e.g. backing out of `HIGHSCORE`) so a key still down doesn't
+instantly fire whatever menu item the cursor sits on (the pointer path
+self-consumes and needs no guard). The `END` retry and `HIGHSCORE` have their
+own equivalent gates (`endReady`/`endHeld`, `highscoreReady`; see Run end).
+Pressing Start is also what unlocks the Web Audio context — browsers block
+autoplay until a user gesture, and Start's key/tap press is the first one
+that's guaranteed to happen (see Music & sound).
 
 `TITLE` shows "Errands of Iris", Iris's speech bubble (see Premise) over the
 dust-patched backdrop, the resting unicorn (offset left of its real spawn
@@ -415,14 +418,14 @@ or any other key, also returns to `TITLE`.
 ## Music & sound
 
 Peppy chiptune background music, via a [voxby](https://github.com/Rybar/voxby)
-/ SoundBox player (`src/js/player.js`, zlib-licensed, ~1.4 KB gz). Two tracks,
-composed in the voxby tracker and exported as data modules
-(`src/js/song-game.js`, `src/js/song-title.js`): a driving one under
-`GAME` + `REWIND`, a calmer one under `LOAD` + `TITLE` + `END`. Both are
-rendered to looping `AudioBuffer`s once at load (`renderSong`, ~0.1 s each —
-the title track is deferred a tick so the two costs don't stack on one frame)
-and swapped by `updateMusic()` whenever the screen crosses the GAME/menu line.
-The context is suspended on pause / tab-hide and resumed on unpause.
+/ SoundBox player (`src/js/player.js`, zlib-licensed, ~1.4 KB gz). One track,
+composed in the voxby tracker and exported as a data module
+(`src/js/song-game.js`), playing under `GAME` + `REWIND` + `END`. `TITLE` is
+silent — an earlier calmer title track was dropped for being too repetitive.
+The track is rendered to a looping `AudioBuffer` once at load (`renderSong`,
+~0.1 s) and started/stopped by `updateMusic()` whenever the screen crosses in
+or out of that GAME/REWIND/END span. The context is suspended on pause /
+tab-hide and resumed on unpause.
 **M** (or the title menu's `[M]usic: N%` item) steps the master gain — shared
 by music and SFX alike — up by 10 points, wrapping from 50% back to 0%;
 starts at 30% (`MASTER_VOLUME` in `sound.js`, tuned down from the GainNode's
@@ -476,8 +479,8 @@ bare buffer-centred spawn would land at world-x `CAMERA_WIDTH` — which moves
 with the window and could sit inside a rock — so `pickSpawnX()` walks right
 from world-x 0 in ~drill-width steps until the column the drill will cut is
 clay-free, and `mapOffsetX` is set to put the drill there. `seatSpawn()`
-applies this same seating to the boot title backdrop, so the LOAD/TITLE →
-GAME transition shows one continuous frame.
+applies this same seating to the boot title backdrop, so the TITLE → GAME
+transition shows one continuous frame.
 
 ---
 

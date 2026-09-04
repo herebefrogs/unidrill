@@ -18,7 +18,7 @@ export const CHARSET_SIZE = 8;
 // font isn't, and e.g. "12m" for metres must not read as "12M" millions). Full
 // character set too - no more charset-sprite repertoire limit.
 
-const FONT = 'Impact, "Haettenschweiler", "Franklin Gothic Bold", "Arial Narrow", sans-serif';
+const FONT = 'Impact, Roboto, -apple-system, sans-serif';
 // Impact's cap-height ink box as a multiple of the old 8px cell - the single
 // knob for apparent text size. Anchoring ink-top at `y` means changing FILL
 // does NOT shift the HUD line stack, so it can be tuned in isolation.
