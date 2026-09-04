@@ -3,7 +3,7 @@ import { isPointerDown, isPointerUp, pointerCanvasPosition, pointerDirection, po
 import { isMobile } from './mobile';
 import { checkMonetization, isMonetizationEnabled } from './monetization';
 import { share } from './share';
-import { loadSongs, playSound, playSong, renderSong, playMusic, resumeAudio, suspendAudio } from './sound';
+import { loadSongs, playSound, playSong, renderSong, playMusic, resumeAudio, suspendAudio, setMuted } from './sound';
 import { initSpeech } from './speech';
 import SONG_GAME from './song-game';
 import SONG_TITLE from './song-title';
@@ -97,6 +97,7 @@ let speak;
 // looping, so a screen change only restarts playback when the track differs.
 let musicGame, musicTitle, musicBuffer;
 let musicUnlocked;
+let muted;                                       // M toggles it (processInputs); mutes music + SFX via the master gain, and shows "MUTED" top-right
 
 function updateMusic() {
   if (!musicUnlocked) return;
@@ -613,6 +614,11 @@ function bootGatePassed() {
 }
 
 function processInputs() {
+  // mute toggle, every screen. isKeyUp consumes KeyM on the frame it's pressed
+  // (it releases whatever's down), so the boot gates / konami / steering never
+  // see it. TODO: title-screen menu option, see TODO.md.
+  if (isKeyUp('KeyM')) { muted = !muted; setMuted(muted); }
+
   switch (screen) {
     case LOAD_SCREEN:
       if (bootGatePassed()) screen = TITLE_SCREEN;
@@ -1360,6 +1366,10 @@ function render() {
       // renderText(monetizationEarned(), TEXT.width - CHARSET_SIZE, TEXT.height - 2*CHARSET_SIZE, ALIGN_RIGHT);
       break;
   }
+
+  // audio mute indicator, top-right (no speaker glyph in the charset) - every
+  // screen, mirrors the HUD's top-left lines
+  if (muted) renderText('muted', CAMERA_WIDTH - CHARSET_SIZE, CHARSET_SIZE, ALIGN_RIGHT, HUD_SCALE);
 
   blit();
 

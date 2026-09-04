@@ -227,6 +227,7 @@ up whether descending or climbing, no inversion between the legs.
   angle reaches the heading math; the ramp magnitude drives the on-screen
   overlay (base disc + knob on the finger; `DEBUG_POINTER` shows the full
   model breakdown).
+- **M**: mute / unmute all audio (see Music & sound). Works on every screen.
 
 **World edges.** The map is unbounded left, right and down — the drill can
 roam sideways as far as it likes, momentum decay is the only limit on a
@@ -379,7 +380,10 @@ composed in the voxby tracker and exported as data modules
 rendered to looping `AudioBuffer`s once at load (`renderSong`, ~0.1 s each —
 the title track is deferred a tick so the two costs don't stack on one frame)
 and swapped by `updateMusic()` whenever the screen crosses the GAME/menu line.
-The context is suspended on pause / tab-hide and resumed on unpause. The
+The context is suspended on pause / tab-hide and resumed on unpause.
+**M** mutes and unmutes all audio (music + SFX together) — a master gain
+node pulled to 0, with "muted" shown top-right. A proper title-screen
+options panel (per-channel volume, this shortcut listed) is TODO. The
 ZzFXM helpers still in `sound.js` are now unused (flagged for the byte-golf
 pass). Sound effects — collecting a dust cell, the dust-counter tally-tick,
 the drill stalling out, the end-run rainbow sprouting — are still TODO.

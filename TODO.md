@@ -13,6 +13,14 @@ as they land — this list stays scoped to open work.
       track (staged de-risk plan — static loop first, confirmed good; couple to
       `hero.momentum` next, then evaluate). Layered stems were considered and
       dropped (one intensity, not worth the bytes).
+- [ ] Options menu on the title screen. Currently the only setting is mute,
+      toggled with **M** (mutes music + SFX via the master gain in sound.js,
+      shows "muted" top-right — see `muted` in game.js). Give TITLE a small
+      options panel listing each setting with its shortcut (mute/M for now,
+      room for SFX vs music split, volume, control scheme later). Ties in
+      with the "Errand of Iris" title-screen rework below. Consider
+      persisting mute via the storage helper.
+
 - [ ] Player sprite. Replace the blue cube with a stylized unicorn drawn at
       runtime with canvas primitives (rects + paths), not a bitmap sprite:
       square head, triangle horn/drill, rectangle body + tail, slim
