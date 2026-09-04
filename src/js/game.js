@@ -50,7 +50,7 @@ const TURN_SPEED = 4 * Math.PI;
 const MOMENTUM = {
   initial: 600,               // launch impulse
   max: 600,                   // soft cap: the highest momentum ordinary drilling holds you at, and where an overspeed boost decays back to (see overBleed). HUD "full speed".
-  overMax: 800,               // hard cap on the transient overshoot a dense patch can stack up (~1.33x max) - the kick is felt even when you enter a patch already at `max`. Ceiling stays under the digShaft limit (per-frame step < the drill diameter down to 30fps) so the carved tunnel never gets gaps.
+  overMax: 800,               // hard cap on the transient overshoot a dense patch can stack up (~1.33x max) - the kick is felt even when you enter a patch already at `max`. (digShaft sweeps the drill disc along the frame's path now, so a fast step no longer risks a tunnel gap - but keep this sane.)
   overBleed: 12,              // 1/sec: exponential rate the excess ABOVE `max` decays (on top of normal drag). ~0.08s time constant, so a boost surges then settles back to `max` in ~0.25s instead of becoming a new plateau. This is the "extra drag above the cap" that makes the two caps mean different things.
   entropy: 35,                // material-independent decay, always applied underground
   tunnelDrag: 15,             // through an already-carved cell - cheap backtrack, not free
@@ -79,7 +79,8 @@ let rainbowT;                                     // seconds accrued on END_SCRE
 // the drill has moved >= TRAIL_STEP from the last point, closed with the exact
 // stop position in endGame(). REWIND_SCREEN walks the camera back down it.
 let trail;
-let rewound;                                     // did this run's end play the camera rewind? true for every run end now (stall AND resurface both retrace the dig) - only a resize abandoning the rewind mid-play sets it false, and END_SCREEN draws the drill sprite in that one case
+let prevDrill;                                    // drill centre (world-x / underground-y) at the end of last frame's dig; digShaft carves the capsule from it to this frame's centre so the tunnel can't gap (launch, or a frame hitch)
+let rewound;                                    // did this run's end play the camera rewind? true for every run end now (stall AND resurface both retrace the dig) - only a resize abandoning the rewind mid-play sets it false, and END_SCREEN draws the drill sprite in that one case
 let rewindI;                                     // index of the trail POINT the rewind camera is currently leaving, counting down to 0 (the surface)
 let rewindT;                                     // 0..1 progress from point rewindI toward point rewindI-1
 let rewindSpeed;                                 // px/sec the rewind camera travels along the polyline (derived from total path length / REWIND_DURATION, clamped)
@@ -248,6 +249,7 @@ dust = 0;
 dustPop = -1;
 particles = [];
 trail = [hero.x + hero.w / 2 + mapOffsetX, hero.y + hero.h / 2 - SURFACE_Y + mapOffset];
+prevDrill = trail.slice();              // drill centre last frame (world/underground); digShaft carves the capsule between it and now
 
 const CTX = c.getContext('2d');         // visible canvas
 const BUFFER = c.cloneNode();           // backbuffer
@@ -433,6 +435,7 @@ function startGame() {
   dustPop = -1;
   particles = [];
   trail = [hero.x + hero.w / 2 + mapOffsetX, hero.y + hero.h / 2 - SURFACE_Y + mapOffset];
+  prevDrill = trail.slice();        // drill centre last frame - starts above the surface, see digShaft
   followCamera();                   // seat the viewport on the freshly-centred hero
   renderMap();
   screen = GAME_SCREEN;
@@ -878,11 +881,28 @@ function endGame(resurfaced) {
   screen = REWIND_SCREEN;
 }
 
-// stamps a fixed-radius circle around the hero's center every frame (per
-// DESIGN.md: fixed-width tunnel, not variable). An axis-aligned box would've
-// carved a fatter tunnel on diagonals than straight down/up.
+// carves the tunnel each frame: a swept fixed-radius disc (per DESIGN.md:
+// fixed-width tunnel, not variable) from last frame's drill centre to this
+// one. A disc, not an axis-aligned box, so a diagonal doesn't carve fatter
+// than a straight run; swept, not a lone stamp, so the tunnel can't gap.
 function digShaft() {
   const [cx, cy] = drillWorld();                            // world-x, underground-y
+  const [px, py] = prevDrill;
+  // carve a capsule from last frame's drill centre to this one, not a lone
+  // disc at the current point. Two gaps that stamping a single disc leaves:
+  // at launch the drill sits above the surface and the first move (worse on a
+  // hitched first frame) can land the disc clear of the ground, so the tunnel
+  // mouth never gets cut; and mid-dive a frame hitch could step further than
+  // the drill diameter. Discs along the path close both.
+  const n = Math.max(1, Math.ceil(Math.hypot(cx - px, cy - py) / CELL_SIZE));
+  for (let i = 1; i <= n; i++) digDisc(lerp(px, cx, i / n), lerp(py, cy, i / n));
+  prevDrill = [cx, cy];
+}
+
+// dig every cell whose centre falls inside the drill disc (fixed radius per
+// DESIGN.md) at (cx, cy) in world-x / underground-y. Cells above the surface
+// (undergroundY < 0) are skipped - there's no terrain there to carve.
+function digDisc(cx, cy) {
   const r = hero.w / 2;
   for (let x = Math.floor((cx - r) / CELL_SIZE) * CELL_SIZE; x < cx + r; x += CELL_SIZE) {
     for (let y = Math.max(0, Math.floor((cy - r) / CELL_SIZE) * CELL_SIZE); y < cy + r; y += CELL_SIZE) {
