@@ -835,7 +835,14 @@ const BUBBLE_LINE = BUBBLE_SCALE * CHARSET_SIZE + 6;
 const BUBBLE_PAD = 14;
 const BUBBLE_RADIUS = 12;
 const BUBBLE_MARGIN = 10;    // never let the box itself touch the screen edge, any viewport width
-const BUBBLE_LINES = ['I have a message to deliver.', 'Collect dust to grow', 'a rainbow bridge.'];
+// last line spells out the controls - always shown, mobile/desktop text differs.
+const BUBBLE_LINES = [
+  'I have a message to deliver.',
+  'Collect dust to grow a',
+  'rainbow bridge.',
+  '',
+  isMobile ? 'Swipe to move' : 'Arrow keys/WASD to move',
+];
 function titleBubbleLayout() {
   const titleBottom = HUD_LINE + HUD_SCALE * 2 * CHARSET_SIZE + HUD_LINE;   // title's cap-top + cap-height + a margin
   const surfaceLine = CAMERA_HEIGHT / 2;
@@ -869,7 +876,7 @@ function processInputs() {
       const items = titleMenuLayout();
       if (isKeyUp('ArrowUp')) titleIndex = (titleIndex - 1 + items.length) % items.length;
       if (isKeyUp('ArrowDown')) titleIndex = (titleIndex + 1) % items.length;
-      if (isKeyUp('Enter')) items[titleIndex].action();
+      if (isKeyUp('Enter') || isKeyUp('Space')) items[titleIndex].action();
       if (isPointerUp()) {
         const [px, py] = pointerViewportPosition();
         const hit = items.findIndex(it => px >= it.x0 && px <= it.x1 && py >= it.y0 && py <= it.y1);
@@ -968,7 +975,7 @@ function processInputs() {
       if (rows.length) {
         if (isKeyUp('ArrowUp')) highscoreIndex = (highscoreIndex - 1 + rows.length) % rows.length;
         if (isKeyUp('ArrowDown')) highscoreIndex = (highscoreIndex + 1) % rows.length;
-        if (isKeyUp('Enter')) { selectSeed(rows[highscoreIndex].seed); break; }
+        if (isKeyUp('Enter') || isKeyUp('Space')) { selectSeed(rows[highscoreIndex].seed); break; }
       }
       if (isPointerUp()) {
         const [px, py] = pointerViewportPosition();
