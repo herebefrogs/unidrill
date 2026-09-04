@@ -446,3 +446,26 @@ Roughly in build order, oldest first.
       HIGHSCORE_SCREEN. The title menu's Music item dropped its `[M]` prefix
       (`Music: N%`) — M still cycles it, just undocumented in the label, the
       only menu item that had been calling out its own shortcut.
+
+- [x] Sound effects. Along the way, found the vendored `zzfxG` in
+      `src/js/sound.js` was a pre-1.2 ZzFX (19 params) — silently dropping
+      `tremolo`/`filter` from any sound exported by a current-gen ZzFX
+      designer, which is why hand-authored SFX played nothing like their
+      editor preview. Ported the generator to v1.3.2
+      (https://github.com/KilledByAPixel/ZzFX, `ZzFXMicro.min.js`'s generate
+      half, split from its buffer/play half so `zzfxP` still routes through
+      `zzfxMaster`) — full 21-param signature now. `SFX_DIG` (collecting a
+      dust cell, in `dig()`) and `SFX_TALLY` (the dust-counter tally-tick, in
+      `updateParticles()`) are hand-designed-in-ZzFX exports. The stalling-out
+      SFX was designed, wired (`endGame(false)`), then cut — decided it wasn't
+      needed once the rainbow-sprout tone landed. That one (`SFX_RAINBOW`) is
+      hand-tuned rather than exported: a low sine climbing steadily higher
+      (positive `slide`, no `deltaSlide` so the rise stays linear), fired once
+      per run in `endGame()` when `dust > 0` (no dust → no rainbow → no tone,
+      same gate `renderRainbow()` uses for "dry run!"). Baked at a nominal
+      `SFX_RAINBOW_DURATION` (2.55s) and stretched via the returned source
+      node's `.playbackRate` to whatever the rewind + `RAINBOW_GROW` actually
+      take that run — not fixed, since `rewindSpeed` is clamped and scales
+      with the shaft's length. Doesn't account for a mid-rewind skip cutting
+      the visual short; the tone just rings past it. `src/js/speech.js` is
+      still stubbed.

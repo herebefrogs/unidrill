@@ -39,8 +39,14 @@ const zzfxR=44100
 // zzfxP() - the sound player -- returns a AudioBufferSourceNode
 const zzfxP=(...t)=>{let e=zzfxX.createBufferSource(),f=zzfxX.createBuffer(t.length,t[0].length,zzfxR);t.map((d,i)=>f.getChannelData(i).set(d)),e.buffer=f,e.connect(zzfxMaster),e.start();return e}
 
-// zzfxG() - the sound generator -- returns an array of sample data
-const zzfxG=(a=1,t=.05,h=220,M=0,n=0,s=.1,i=0,r=1,o=0,z=0,e=0,f=0,m=0,x=0,b=0,d=0,u=0,c=1,G=0,I=zzfxR,P=99+M*I,V=n*I,g=s*I,j=G*I,k=u*I,l=2*Math.PI,p=(a=>0<a?1:-1),q=P+j+V+g+k,v=(o*=500*l/I**2),w=(h*=(1+2*t*Math.random()-t)*l/I),y=p(b)*l/4,A=0,B=0,C=0,D=0,E=0,F=0,H=1,J=[])=>{for(;C<q;J[C++]=F)++E>100*d&&(E=0,F=A*h*Math.sin(B*b*l/I-y),F=p(F=i?1<i?2<i?3<i?Math.sin((F%l)**3):Math.max(Math.min(Math.tan(F),1),-1):1-(2*F/l%2+2)%2:1-4*Math.abs(Math.round(F/l)-F/l):Math.sin(F))*Math.abs(F)**r*a*zzfxV*(C<P?C/P:C<P+j?1-(C-P)/j*(1-c):C<P+j+V?c:C<q-k?(q-C-k)/g*c:0),F=k?F/2+(k>C?0:(C<q-k?1:(C-q)/k)*J[C-k|0]/2):F),A+=1-x+1e9*(Math.sin(C)+1)%2*x,B+=1-x+1e9*(Math.sin(C)**2+1)%2*x,h+=o+=500*z*l/I**3,H&&++H>f*I&&(h+=e*l/I,w+=e*l/I,H=0),m&&++D>m*I&&(h=w,o=v,D=1,H=H||1);return J};
+// zzfxG() - the sound generator -- returns an array of sample data. Ported
+// straight from ZzFX v1.3.2 (https://github.com/KilledByAPixel/ZzFX,
+// ZzFXMicro.min.js's generator half, split from its buffer/play half so
+// zzfxP below can still route the result through zzfxMaster) - the version
+// this used to be vendored from predated the tremolo/filter params (19 args,
+// not 21), which silently mangled any sound exported from a current-gen ZzFX
+// designer that sets a non-zero filter.
+const zzfxG=(p=1,k=.05,b=220,e=0,r=0,t=.1,q=0,D=1,u=0,y=0,v=0,z=0,l=0,E=0,A=0,F=0,c=0,w=1,m=0,B=0,N=0,M=Math,d=2*M.PI,R=zzfxR,G=u*=500*d/R/R,C=b*=(1-k+2*k*M.random(k=[]))*d/R,g=0,H=0,a=0,n=1,I=0,J=0,f=0,h=N<0?-1:1,x=d*h*N*2/R,L=M.cos(x),Z=M.sin,K=Z(x)/4,O=1+K,X=-2*L/O,Y=(1-K)/O,P=(1+h*L)/2/O,Q=-(h+L)/O,S=P,T=0,U=0,V=0,W=0)=>{e=R*e+9;m*=R;r*=R;t*=R;c*=R;y*=500*d/R**3;A*=d/R;v*=d/R;z*=R;l=R*l|0;p*=zzfxV;for(h=e+m+r+t+c|0;a<h;k[a++]=f*p)++J%(100*F|0)||(f=q?1<q?2<q?3<q?4<q?(g/d%1<D/2)*2-1:Z(g**3):M.max(M.min(M.tan(g),1),-1):1-(2*g/d%2+2)%2:1-4*M.abs(M.round(g/d)-g/d):Z(g),f=(l?1-B+B*Z(d*a/l):1)*(4<q?f:(f<0?-1:1)*M.abs(f)**D)*(a<e?a/e:a<e+m?1-(a-e)/m*(1-w):a<e+m+r?w:a<h-c?(h-a-c)/t*w:0),f=c?f/2+(c>a?0:(a<h-c?1:(h-a)/c)*k[a-c|0]/2/p):f,N?f=W=S*T+Q*(T=U)+P*(U=f)-Y*V-X*(V=W):0),x=(b+=u+=y)*M.cos(A*H++),g+=x+x*E*Z(a**5),n&&++n>z&&(b+=v,C+=v,n=0),!l||++I%l||(b=C,u=G,n=n||1);return k};
 
 // zzfx() - the universal entry point -- returns a AudioBufferSourceNode
 const zzfx=(...t)=>zzfxP(zzfxG(...t))
@@ -71,6 +77,22 @@ export const playSong = songData => zzfxP(...songData);
  * @returns ?
  */
 export const playSound = soundData => zzfx(...soundData);
+
+// SFX data, straight out of the ZzFX sound designer's JSON export:
+// [volume, randomness, frequency, attack, sustain, release, shape,
+// shapeCurve, slide, deltaSlide, pitchJump, pitchJumpTime, repeatTime, noise,
+// modulation, bitCrush, delay, sustainVolume, decay, tremolo, filter]
+export const SFX_DIG = [1, 0.05, 178, 0.04, 0.03, 0.08, 1, 2.5, 2, 171, 0, 0, 0, 0.8, 0, 0.1, 0, 0.59, 0.05, 0, -1488];       // collecting a dust cell
+export const SFX_TALLY = [1.8, 0.05, 523, 0.02, 0.09, 0.29, 0, 0.7, 0, 0, 307, 0.1, 0, 0.2, 0, 0.1, 0, 0.69, 0.01, 0, -1497]; // dust-counter tally-tick
+
+// end-run rainbow sprouting: a low sine climbing steadily higher (positive
+// slide, no deltaSlide so the rise stays linear), hand-tuned rather than
+// exported from the designer. Baked at a nominal SFX_RAINBOW_DURATION - the
+// caller (game.js) stretches playback via .playbackRate so it spans however
+// long the rewind + rainbow grow actually take (that total isn't fixed, it
+// scales with the shaft's length).
+export const SFX_RAINBOW = [1, 0.02, 90, 0.05, 1.2, 1, 0, 1, 0.35, 0, 0, 0, 0, 0, 0, 0, 0, 0.8, 0.3];
+export const SFX_RAINBOW_DURATION = 2.55; // attack+decay+sustain+release above, in seconds
 
 
 // --- Background music (voxby / SoundBox songs, played through player.js) ---

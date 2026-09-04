@@ -3,7 +3,7 @@ import { isPointerDown, isPointerUp, pointerCanvasPosition, pointerDirection, po
 import { isMobile } from './mobile';
 import { checkMonetization, isMonetizationEnabled } from './monetization';
 import { share } from './share';
-import { loadSongs, playSound, playSong, renderSong, playMusic, stopMusic, resumeAudio, suspendAudio, setVolume, MASTER_VOLUME } from './sound';
+import { loadSongs, playSound, playSong, renderSong, playMusic, stopMusic, resumeAudio, suspendAudio, setVolume, MASTER_VOLUME, SFX_DIG, SFX_TALLY, SFX_RAINBOW, SFX_RAINBOW_DURATION } from './sound';
 import { initSpeech } from './speech';
 import SONG_GAME from './song-game';
 import { save, load } from './storage';
@@ -1300,6 +1300,13 @@ function endGame(resurfaced) {
   // half-buffer per frame (30fps worst case) or scrollMap's self-blit maths
   // would run past the buffer edge.
   rewindSpeed = clamp(pathLen / REWIND_DURATION, 600, CAMERA_WIDTH * 8);
+  // the rising-pitch sprout tone spans the rewind + the rainbow's grow sweep -
+  // stretched via playbackRate since that total isn't fixed (rewindSpeed above
+  // is clamped, so actual rewind time scales with the shaft's length). Only
+  // when there's a rainbow to sprout - dust ? rewindI : 0 above already means
+  // no flood, so no tone either. Doesn't account for a mid-rewind skip
+  // (rewindSkip) cutting the visual short - the tone just rings past it.
+  if (dust) playSound(SFX_RAINBOW).playbackRate.value = SFX_RAINBOW_DURATION / (pathLen / rewindSpeed + RAINBOW_GROW);
   screen = REWIND_SCREEN;
 }
 
@@ -1358,6 +1365,7 @@ function dig(worldX, undergroundY) {
     const d = sampleDust(worldX, undergroundY);
     if (d !== DUST_NONE) {
       spawnDustParticle(worldX, undergroundY);
+      playSound(SFX_DIG);
       if (d === DUST_DENSE) hero.momentum = Math.min(MOMENTUM.overMax, hero.momentum + MOMENTUM.denseBoost);
     }
   }
@@ -1425,7 +1433,7 @@ function updateParticles() {
         p.y0 = p.y + p.pushY - cameraY;
       }
     } else if (p.t >= p.flyDuration) {
-      if (!p.counted) { dust++; dustPop = gameTime; }
+      if (!p.counted) { dust++; dustPop = gameTime; playSound(SFX_TALLY); }
       particles.splice(i, 1);
     }
   }

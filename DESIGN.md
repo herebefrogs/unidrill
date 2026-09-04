@@ -443,8 +443,22 @@ by music and SFX alike — up by 10 points, wrapping from 50% back to 0%;
 starts at 30% (`MASTER_VOLUME` in `sound.js`, tuned down from the GainNode's
 implicit 100%, which played too loud). Works on every screen. The ZzFXM
 helpers still in `sound.js` are now unused (flagged for the byte-golf pass).
-Sound effects — collecting a dust cell, the dust-counter tally-tick, the
-drill stalling out, the end-run rainbow sprouting — are still TODO.
+
+Sound effects run through the same `zzfxG`/`zzfxP`/`zzfx` trio (ZzFX v1.3.2,
+full 21-param generator, ported from
+[ZzFXMicro.min.js](https://github.com/KilledByAPixel/ZzFX) so a sound
+designed and exported from a current ZzFX tool — including its `tremolo`/
+`filter` fields — plays back faithfully). `SFX_DIG` fires from `dig()` when a
+dust cell is uncovered; `SFX_TALLY` fires from `updateParticles()` when a
+dust particle lands and the counter ticks. `SFX_RAINBOW` — a low sine
+climbing steadily higher, hand-tuned rather than exported — plays once per
+run in `endGame()`, gated on `dust > 0` (no dust, no rainbow, no tone, same
+condition `renderRainbow()` uses for "dry run!"); it's baked at a nominal
+`SFX_RAINBOW_DURATION` and stretched via the source node's `.playbackRate` to
+span however long the camera rewind + the rainbow's `RAINBOW_GROW` sweep
+actually take that run (not fixed — `rewindSpeed` is clamped, so it scales
+with the shaft's length). The drill stalling out doesn't get its own SFX —
+considered, wired, then cut once the rainbow tone covered that beat.
 
 ## Replayability
 

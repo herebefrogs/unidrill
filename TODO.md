@@ -5,12 +5,6 @@ for the reasoning behind each of these; this is just the sequencing.
 Completed items are moved to `CHANGELOG.md` (an archive, not read on startup)
 as they land — this list stays scoped to open work.
 
-- [ ] Sound effects. SFX for: collecting a dust cell, the dust counter
-      tally-tick, stalling out (momentum hits 0), and sprouting the end-run
-      rainbow. `playSound` (ZzFX) in src/js/sound.js is wired; src/js/speech.js
-      is still stubbed. Background music is done (voxby/SoundBox — see
-      CHANGELOG). Layered stems were considered and dropped (one intensity,
-      not worth the bytes).
 - [ ] Draw Iris and animate her on the title and end screens. The title-
       screen framing (name, copy, speech bubble) has landed — see CHANGELOG,
       "Errands of Iris title screen" — but Iris herself is still only implied
