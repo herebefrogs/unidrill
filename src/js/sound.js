@@ -8,13 +8,27 @@ import { CPlayer } from './player';
 // zzfxX - the common audio context
 const zzfxX=new(window.AudioContext||webkitAudioContext);
 
-// master gain every source (SFX + music) routes through, so one toggle mutes
-// the lot - including tracks/SFX that start while muted (they connect here too).
+// starting output level (0..1) - voxby/SoundBox has no volume knob of its
+// own (a track plays at whatever the tracker's instrument volumes render to,
+// scaled by the player's fixed internal gain), so this GainNode is the only
+// lever; it was too loud at the GainNode's implicit 1.0 default. Also the
+// (currently unused) ZzFX SFX's ceiling once that lands. Exported so game.js
+// can seed the title menu's Music % label from the same number instead of
+// duplicating it. The title menu's Music item / M key cycle the live level
+// from here in 10-point steps, wrapping past 50% back to 0% - see
+// cycleVolume() in game.js.
+export const MASTER_VOLUME = 0.3;
+
+// master gain every source (SFX + music) routes through, so setting it here
+// scales the lot at once - including tracks/SFX that start after. Starts at
+// MASTER_VOLUME (not the GainNode's 1.0 default) - setVolume() isn't called
+// until the first M press/tap, and playback can start before that.
 const zzfxMaster=zzfxX.createGain();
+zzfxMaster.gain.value = MASTER_VOLUME;
 zzfxMaster.connect(zzfxX.destination);
 
-/** Mute or unmute all game audio (music + SFX). */
-export const setMuted = m => { zzfxMaster.gain.value = m ? 0 : 1; };
+/** Set the master volume (0..1) for all game audio (music + SFX). */
+export const setVolume = v => { zzfxMaster.gain.value = v; };
 
 // zzfxV - global volume
 const zzfxV=.3

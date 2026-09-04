@@ -1,3 +1,19 @@
+bugs:
+- inputs/pointer.js `isPointerUp()`: `pointerDownTime = 0 || true` parses as
+  `pointerDownTime = (0 || true)` (`=` binds looser than `||`), so it assigns
+  `true` instead of resetting to `0` - pointerDownTime never actually clears,
+  so isPointerUp() (and isPointerDown()) keeps reading truthy on every frame
+  after the first press/release. Harmless for a one-shot gate (bootGatePassed
+  et al - the screen moves on before it's polled again), but re-triggers every
+  frame on anything that stays on the same screen and reacts to a tap (e.g. a
+  title-screen menu item toggled infinitely on a single click). Fix: add
+  parens - `(pointerDownTime = 0) || true`.
+
+credits:
+- README's "Special Thanks & Credits" credits Ryan Malm for the Twitter
+  message code, but not for the pixel/bitmap font (from Glitch Hunter) also
+  used in the boilerplate - add his name to that credit line too.
+
 scratchpad:
 - lots of x,y also have a corresponding w,h. That could be captured in a rect(x,y,w,h) structure
   - ala https://developer.mozilla.org/en-US/docs/Web/API/DOMRect

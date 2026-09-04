@@ -220,6 +220,61 @@ Roughly in build order, oldest first.
       a placeholder-`CAMERA_WIDTH` world column ~1 viewport off the real spawn.
       See DESIGN.md "Replayability".
 
+- [x] Player sprite. Stylized unicorn drawn at runtime with canvas
+      primitives in `drawHero()`: purple triangle horn along the heading,
+      white head/body blocks, purple tail stub, 4 slim legs swinging on a
+      distance-driven phase (`hero.legPhase`, advanced in `moveHero()` so
+      cadence tracks momentum and freezes on pause). Collision AABB
+      (`HERO_W`/`HERO_H`) unchanged — render-only. Rag-doll spine and horn
+      input-reaction were deferred to a feel pass and never revisited.
+
+- [x] Options menu on the title screen (built alongside the "Errands of
+      Iris" title-screen rework — see Later/revisit for the framing half).
+      TITLE now shows a real menu: **Start**, **[M]usic: N%**,
+      **Highscores**, **New seed** (see Highscore below). Up/Down move the
+      selection (a `>` chevron in its own left column so labels never shift),
+      Enter triggers it; each row also gets a full-width tap hit box
+      (`titleMenuLayout()`/`processInputs()`), guarded by `titleArmed` so a
+      key/tap still held from passing the LOAD gate doesn't instantly fire an
+      item. **M**/`[M]usic` replaces binary mute with a volume percentage:
+      steps the shared master gain (`sound.js`) up by 10 points, wrapping
+      50%→0%; starts at 30% (`MASTER_VOLUME`, down from the GainNode's loud
+      100% default). The old top-right "muted" indicator is gone — the menu
+      item is the indicator now. Along the way: fixed a real bug in
+      `inputs/pointer.js`'s `isPointerUp()` — `pointerDownTime = 0 || true`
+      parsed as `= (0 || true)` (assigns `true`, never resets to 0), so a
+      menu item toggled on/off infinitely on a single tap; fixed with parens,
+      `(pointerDownTime = 0) || true`.
+
+- [x] Highscore. Per-seed table under `2026.errands-of-iris.highscores`
+      (`storage.js` — fixed its stale `2020.workingTitle` prefix, and
+      `save`/`load` now JSON-serialise/parse so an object round-trips, not
+      just a string), `{ score, date }` keyed by the `terrain-dust` seed
+      string (`runSeed`, set in `seedMap()`/`applySeed()`). `endGame()`
+      writes a new entry only when it beats what's on record for that seed,
+      then caps the table at `HIGHSCORE_MAX` (10) by evicting the lowest
+      score(s) — a top-10 leaderboard, not a full history, so no
+      scroll/paging UI is needed (accepted tradeoff: a seed only earns/keeps
+      a slot by beating what's already there — the "New seed" reroll is the
+      escape hatch for a seed that can't). New `HIGHSCORE_SCREEN`, reached
+      from the title menu's **Highscores** item: same dust/hero backdrop as
+      TITLE, a borderless `Seed | Score | Date` table sorted by score,
+      columns sized off the widest cell per column. Doubles as a seed picker
+      — Up/Down/Enter or a tap on a row (`selectSeed()`) loads that seed,
+      re-seats + repaints the underground (`seatSpawn()`/`renderMap()`) and
+      drops back to TITLE on it, so Start still plays the jump-in animation
+      rather than skipping straight to GAME_SCREEN. A tap elsewhere, or any
+      other key, also returns to TITLE (`highscoreReady`, same
+      release-then-fresh-press gate as `endReady`/`bootReady`). The title
+      menu's **New seed** item (`rerollSeed()`) rolls a fresh random
+      terrain/dust pair the same way — `getRandSeed(true)` (existing
+      boilerplate helper in `utils.js`, off `Math.random`, not `hash2D`/the
+      unused `utils.js` prng stream), uppercased for readability (costs some
+      of base64's variety, worth it — a hand-typed or shared-URL seed is now
+      also uppercased before parsing in `seedMap()`). A small `Seed:
+      TERRAIN-DUST` corner label on TITLE keeps the seed visible even in
+      js13kgames' iframe embed, which hides the URL bar.
+
 ## Playtest / gameplay balancing
 
 - [x] Steering model — absolute direction vs. bank. RESOLVED: playtesters
@@ -340,3 +395,23 @@ Roughly in build order, oldest first.
       `Well dug!` / `Dry run!` / `Double rainbow!`, `Press any key to play
       again`) and resized (LOAD + title prompt 3x, `UniDrill Corp` 2x). Blocks
       title/end-screen polish that was waiting on a real font.
+
+- [x] "Errands of Iris" title screen (the title-screen half of "Name the game
+      Errand of Iris and build the light framing around it" — the end-screen
+      Iris-crossing half is still open, needs her own sprite, see TODO.md).
+      Renamed `document.title` and the on-screen title to "Errands of Iris"
+      (plural — the TODO item said "Errand", the plural read better once
+      written out), replacing "UniDrill Corp". Pinned near the top of TITLE
+      (not vertically centred) to leave the surface clear below for the
+      scene: the resting unicorn — `drawHero()` at its true spawn pose, just
+      offset left of it (`TITLE_JUMP_RX`) until Start fires, then hopped back
+      along a smoothstep-eased semicircular arc into the real game-start pose
+      (`titleJumpT`/`titleJumpPose`/`updateTitleJump`, ticked from `update()`)
+      before handing off to `startGame()` — and a comic-style speech bubble
+      (`renderBubble()`, new in `text.js`: a plain white rounded rect, no
+      tail) reading "I have a message to deliver. Collect dust to grow a
+      rainbow bridge.", clamped to stay on-screen on a narrow viewport.
+      `renderDust()` now also runs on TITLE so the dust patches the bubble is
+      talking about are visible behind the menu. Also dropped the boilerplate
+      Konami-code easter egg (game.js + the README mention) — unused, not
+      part of this game. See DESIGN.md "Premise" and "Screens".

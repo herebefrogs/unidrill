@@ -51,27 +51,32 @@ export const clearTextBuffer = () => {
 }
 
 /**
- * Render a white message in Impact, sized so its cap height spans
- * `scale * CHARSET_SIZE * FILL` px with the cap top anchored at `y`. A black
- * casing (round-joined `strokeText` under the fill - no backing rect, hugs the
- * glyphs) keeps it legible on any background.
+ * Render a message in Impact, sized so its cap height spans
+ * `scale * CHARSET_SIZE * FILL` px with the cap top anchored at `y`. Default
+ * white with a black casing (round-joined `strokeText` under the fill - no
+ * backing rect, hugs the glyphs) to stay legible on any background; a
+ * non-white `color` (e.g. black text on a solid bubble backing, see
+ * renderBubble) skips the casing - it's already on a contrasting backing.
  * @param {string} msg
  * @param {number} x
  * @param {number} y      cap-top of the text box
  * @param {number} align  ALIGN_LEFT | ALIGN_CENTER | ALIGN_RIGHT
  * @param {number} scale  box-height multiplier (may be fractional - pop anims)
+ * @param {string} color  fill color; '#fff' (default) also gets the black casing
  */
-export function renderText(msg, x, y, align = ALIGN_LEFT, scale = 1) {
+export function renderText(msg, x, y, align = ALIGN_LEFT, scale = 1, color = '#fff') {
   const box = scale * CHARSET_SIZE * FILL;
   msg = '' + msg;
   ctx.font = `${box / capH}px ${FONT}`;
   ctx.textAlign = ALIGN[align];
   ctx.textBaseline = 'alphabetic';
-  ctx.lineJoin = ctx.lineCap = 'round';
-  ctx.lineWidth = box / 3;                 // outset ~box/6 of black around the ink
-  ctx.strokeStyle = '#000';
-  ctx.strokeText(msg, x, y + box);
-  ctx.fillStyle = '#fff';
+  if (color === '#fff') {
+    ctx.lineJoin = ctx.lineCap = 'round';
+    ctx.lineWidth = box / 3;               // outset ~box/6 of black around the ink
+    ctx.strokeStyle = '#000';
+    ctx.strokeText(msg, x, y + box);
+  }
+  ctx.fillStyle = color;
   ctx.fillText(msg, x, y + box);
 }
 
@@ -79,4 +84,12 @@ export function renderText(msg, x, y, align = ALIGN_LEFT, scale = 1) {
 export function textWidth(msg, scale = 1) {
   ctx.font = `${scale * CHARSET_SIZE * FILL / capH}px ${FONT}`;
   return ctx.measureText('' + msg).width;
+}
+
+/** Filled white rounded rect (e.g. a comic-style caption/speech-bubble backing), same buffer/space as renderText. */
+export function renderBubble(x, y, w, h, r) {
+  ctx.fillStyle = '#fff';
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, r);
+  ctx.fill();
 }

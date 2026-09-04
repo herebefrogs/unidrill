@@ -13,6 +13,15 @@ Rainbows don't appear in the sky — they sprout from the ground. Unicorns drill
 underground with their horn, hunting for rainbow dust. Bring enough dust back to
 the surface and a new rainbow spawns.
 
+**Framing: Errands of Iris.** Iris — Greek goddess of the rainbow, messenger
+of the gods, who travels *along* the rainbow — has a message to deliver and
+can only travel by one. Nobody in-game needs the myth spelled out; it's
+carried by a title-screen beat: a speech bubble reads "I have a message to
+deliver. Collect dust to grow a rainbow bridge." over a backdrop showing the
+dust patches she means. The player is still the unicorn drill; Iris is only
+ever an NPC. A matching end-screen beat — Iris walking the finished rainbow,
+scaled to the haul — needs her own sprite and is still open (see TODO.md).
+
 ## Core loop
 
 Push-your-luck, one decision per second: **drill deeper for more dust, or head
@@ -229,7 +238,7 @@ up whether descending or climbing, no inversion between the legs.
   angle reaches the heading math; the ramp magnitude drives the on-screen
   overlay (base disc + knob on the finger; `DEBUG_POINTER` shows the full
   model breakdown).
-- **M**: mute / unmute all audio (see Music & sound). Works on every screen.
+- **M**: step the master volume (see Music & sound). Works on every screen.
 
 **World edges.** The map is unbounded left, right and down — the drill can
 roam sideways as far as it likes, momentum decay is the only limit on a
@@ -374,14 +383,34 @@ separation for parallax.
 ## Screens
 
 Boot flow is `LOAD → TITLE → GAME → REWIND → END`, then `END → GAME` on retry
-(no return to the title). `LOAD` is a black screen with a `Loading complete` /
-`Press any key` line — it exists only to catch the first input gesture, which
-is what unlocks the Web Audio context (browsers block autoplay until then).
-`TITLE` shows the game name and a `Press any key to start` prompt. Both are click-through gates:
-`bootGatePassed()` snapshots the keys held when a gate is passed so a key still
-down doesn't fall straight through the next screen (the pointer path
-self-consumes and needs no guard). The `END` retry has its own equivalent gate
-(`endReady` / `endHeld`, see Run end).
+(no return to the title). `HIGHSCORE` branches off `TITLE` and returns to it —
+not part of that main chain. `LOAD` is a black screen with a `Loading
+complete` / `Press any key` (`Tap to continue` on mobile) line — it exists
+only to catch the first input gesture, which is what unlocks the Web Audio
+context (browsers block autoplay until then). Both `LOAD` and the title
+menu's first arming are click-through gates: `bootGatePassed()`/`titleArmed`
+snapshot the keys held when a gate is passed so a key still down doesn't fall
+straight through the next screen (the pointer path self-consumes and needs no
+guard). The `END` retry and `HIGHSCORE` have their own equivalent gates
+(`endReady`/`endHeld`, `highscoreReady`; see Run end).
+
+`TITLE` shows "Errands of Iris", Iris's speech bubble (see Premise) over the
+dust-patched backdrop, the resting unicorn (offset left of its real spawn
+point — see below), a small `Seed: TERRAIN-DUST` corner label (js13kgames
+runs entries in an iframe, hiding the URL bar and the seed with it), and a
+menu: **Start**, **[M]usic: N%**, **Highscores**, **New seed**. Up/Down move
+the selection (a `>` chevron in its own column so labels never shift), Enter
+triggers it; each row also has a tap-friendly hit box for mobile. Selecting
+Start hops the resting unicorn along a semicircular arc into its real
+game-start pose (`titleJumpT`/`titleJumpPose`, eased) before handing off to
+`GAME_SCREEN` — the "jump in" is deliberate, distinguishing a fresh run from
+just idling on the title art.
+
+`HIGHSCORE` shows the same dust/unicorn backdrop under a `Seed | Score | Date`
+table (see Replayability) and doubles as a seed picker: Up/Down/Enter or a tap
+on a row loads that seed and drops back to `TITLE` on it (so Start still
+plays the jump-in) rather than starting the game directly. A tap elsewhere,
+or any other key, also returns to `TITLE`.
 
 ## Music & sound
 
@@ -394,12 +423,13 @@ rendered to looping `AudioBuffer`s once at load (`renderSong`, ~0.1 s each —
 the title track is deferred a tick so the two costs don't stack on one frame)
 and swapped by `updateMusic()` whenever the screen crosses the GAME/menu line.
 The context is suspended on pause / tab-hide and resumed on unpause.
-**M** mutes and unmutes all audio (music + SFX together) — a master gain
-node pulled to 0, with "muted" shown top-right. A proper title-screen
-options panel (per-channel volume, this shortcut listed) is TODO. The
-ZzFXM helpers still in `sound.js` are now unused (flagged for the byte-golf
-pass). Sound effects — collecting a dust cell, the dust-counter tally-tick,
-the drill stalling out, the end-run rainbow sprouting — are still TODO.
+**M** (or the title menu's `[M]usic: N%` item) steps the master gain — shared
+by music and SFX alike — up by 10 points, wrapping from 50% back to 0%;
+starts at 30% (`MASTER_VOLUME` in `sound.js`, tuned down from the GainNode's
+implicit 100%, which played too loud). Works on every screen. The ZzFXM
+helpers still in `sound.js` are now unused (flagged for the byte-golf pass).
+Sound effects — collecting a dust cell, the dust-counter tally-tick, the
+drill stalling out, the end-run rainbow sprouting — are still TODO.
 
 ## Replayability
 
@@ -423,9 +453,22 @@ field, so they can be rerolled independently. They ride one URL param,
 back to the URL so any run is a shareable link. (Seed 0 — unreachable through
 `seedMap` — reproduces the original unseeded map.)
 
-Still TODO: a title-screen control to share the current seed (`share.js`) and
-roll a fresh one, and per-seed high scores under the `2026.unidrill` storage
-key (`storage.js`) so a player can reload an old seed to beat their score.
+The title menu's **New seed** item rerolls a fresh random terrain/dust pair
+(`getRandSeed(true)`, uppercased for readability) with no typing required,
+re-seating and repainting the underground on it immediately so the title
+backdrop never shows stale terrain. Still TODO: an explicit "share your
+seed" control (helper in `share.js`) — the resolved seed is already in the
+URL and shown on the title screen (see Screens), so this is mostly a
+share/copy button.
+
+**Highscores.** A per-seed table under the `2026.errands-of-iris.highscores`
+storage key (`storage.js`, JSON-serialised), each entry `{ score, date }`
+keyed by its `terrain-dust` seed string. `endGame()` writes a new entry only
+when it beats what's on record for that seed, then caps the table at 10 by
+evicting the lowest score(s) — a top-10 leaderboard, not a full history, so
+no scroll/paging UI is needed. The title menu's **Highscores** item opens
+`HIGHSCORE_SCREEN` (see Screens), which lists `Seed | Score | Date` sorted by
+score and doubles as the seed picker described above.
 
 **Deterministic spawn.** The drill starts buffer-centred (so the camera seats
 on it at any viewport size) with `mapOffsetX` carrying its world position. A

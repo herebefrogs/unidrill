@@ -3,19 +3,17 @@ import { isPointerDown, isPointerUp, pointerCanvasPosition, pointerDirection, po
 import { isMobile } from './mobile';
 import { checkMonetization, isMonetizationEnabled } from './monetization';
 import { share } from './share';
-import { loadSongs, playSound, playSong, renderSong, playMusic, resumeAudio, suspendAudio, setMuted } from './sound';
+import { loadSongs, playSound, playSong, renderSong, playMusic, resumeAudio, suspendAudio, setVolume, MASTER_VOLUME } from './sound';
 import { initSpeech } from './speech';
 import SONG_GAME from './song-game';
 import SONG_TITLE from './song-title';
 import { save, load } from './storage';
-import { ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, CHARSET_SIZE, renderText, textWidth, initTextBuffer, clearTextBuffer } from './text';
+import { ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, CHARSET_SIZE, renderText, renderBubble, textWidth, initTextBuffer, clearTextBuffer } from './text';
 import { clamp, getRandSeed, setRandSeed, loadImg, lerp } from './utils';
 import { CELL_SIZE, CLAY, sampleMaterial, materialColor, MATERIAL_DRAG, sampleDust, DUST_NONE, DUST_DENSE, setMapSeed } from './terrain';
 import TILESET from '../img/tileset.webp';
 
 
-const konamiCode = ['ArrowUp','ArrowUp','ArrowDown','ArrowDown','ArrowLeft','ArrowRight','ArrowLeft','ArrowRight','KeyB','KeyA'];
-let konamiIndex = 0;
 
 // GAMEPLAY VARIABLES
 
@@ -24,6 +22,7 @@ const TITLE_SCREEN = 1;
 const GAME_SCREEN = 2;
 const REWIND_SCREEN = 3;   // run over: camera fast-walks the drilled path back up to the surface (see updateRewind), then -> END_SCREEN
 const END_SCREEN = 4;
+const HIGHSCORE_SCREEN = 5;   // reached from the TITLE_SCREEN menu, returns to it - not part of the main LOAD->...->END flow
 let screen = LOAD_SCREEN;
 
 // factor by which to reduce both velX and velY when player moving diagonally
@@ -97,7 +96,7 @@ let speak;
 // looping, so a screen change only restarts playback when the track differs.
 let musicGame, musicTitle, musicBuffer;
 let musicUnlocked;
-let muted;                                       // M toggles it (processInputs); mutes music + SFX via the master gain, and shows "MUTED" top-right
+let volumePct = MASTER_VOLUME * 100;             // M cycles it (processInputs), or the title menu's Music item; see cycleVolume()
 
 function updateMusic() {
   if (!musicUnlocked) return;
@@ -106,6 +105,17 @@ function updateMusic() {
     playMusic(want);
     musicBuffer = want;
   }
+}
+
+// shared by the M key (any screen) and the title menu's Music item. Steps the
+// volume up by VOLUME_STEP percentage points, wrapping back to 0 once it'd
+// pass VOLUME_MAX - integer percent throughout (not a 0..1 float) so repeated
+// steps can't drift off their round numbers.
+const VOLUME_STEP = 10;
+const VOLUME_MAX = 50;
+function cycleVolume() {
+  volumePct = volumePct >= VOLUME_MAX ? 0 : volumePct + VOLUME_STEP;
+  setVolume(volumePct / 100);
 }
 
 // RENDER VARIABLES
@@ -447,7 +457,6 @@ function seatSpawn() {
 function startGame() {
   // setRandSeed(getRandSeed());
   // if (isMonetizationEnabled()) { unlockExtraContent() }
-  konamiIndex = 0;
   DUG.clear();
   FILLED.clear();
   hero = {
@@ -628,11 +637,224 @@ const pointerMapPosition = () => {
   return [x*CAMERA_WIDTH/c.width + cameraX, y*CAMERA_HEIGHT/c.height + cameraY].map(Math.round);
 }
 
-// LOAD and TITLE are click-through gates. A key still held from the press that
-// passed one gate must not fall straight through the next, so each pass
-// snapshots what's down (bootHeld) and only a key outside that snapshot - or a
-// fresh press after everything's been released (bootReady) - counts. isPointerUp()
-// already consumes the press, so the pointer path needs no extra guard.
+// same conversion as pointerMapPosition but without the camera offset - the
+// coordinate space TEXT/HUD elements (incl. the title menu) are drawn in.
+const pointerViewportPosition = () => {
+  const [x, y] = pointerCanvasPosition(c.width, c.height);
+  return [x*CAMERA_WIDTH/c.width, y*CAMERA_HEIGHT/c.height];
+}
+
+// TITLE_SCREEN menu: which row is selected (Up/Down/tap move it, Enter/tap
+// triggers it). Only 2 items for now - see TODO.md's options-panel item for
+// what else lands here later.
+let titleIndex = 0;
+let titleArmed = false;   // see the LOAD-gate-holdover guard in processInputs()
+const SEED_LABEL_SCALE = 1.5;   // small corner credit line, not a menu item - see the TITLE_SCREEN render() case
+function titleMenuItems() {
+  return [
+    { label: 'Start', action: beginTitleJump },
+    // sizeLabel: a stand-in for layout math - the live label's width changes
+    // as volumePct's digit count does (0% vs 10%+), which would otherwise
+    // jiggle the whole centred block every step; '50%' covers the widest
+    // case (VOLUME_MAX) so the reserved width never moves. Fine if the live
+    // label sits a touch narrower than that - it's left-aligned, not centred.
+    { label: '[M]usic: ' + volumePct + '%', sizeLabel: '[M]usic: 50%', action: cycleVolume },
+    { label: 'Highscores', action: goHighscores },
+    { label: 'New seed', action: rerollSeed },
+  ];
+}
+
+// reroll a fresh random terrain+dust pair (no typing required - see the
+// title-menu item above) and re-seat + repaint the title backdrop on it, same
+// as onload's boot sequence (seatSpawn + renderMap), so the dust patches /
+// resting unicorn shown always match the new terrain instead of a jarring
+// jump-cut the moment GAME_SCREEN starts. getRandSeed(true) ignores the URL
+// and returns 6 random base64 chars (boilerplate helper in utils.js),
+// uppercased for readability (costs some of base64's variety, worth it);
+// called twice for independent terrain/dust halves, off Math.random - not
+// hash2D, not the (unused) utils.js prng stream, matching how the rest of the
+// game's cosmetic randomness (e.g. particle jitter) already draws straight
+// from Math.random.
+function rerollSeed() {
+  applySeed(getRandSeed(true).toUpperCase(), getRandSeed(true).toUpperCase());
+  seatSpawn();
+  renderMap();
+}
+
+// Row layout for both render() (draws each label) and processInputs() (hit-
+// tests taps). The whole block is centred horizontally and vertically in the
+// lower half of the screen, below the surface line, so the unicorn/Iris/
+// speech-bubble framing above it stays clear - but labels inside it are left
+// aligned (flush to one another) with the "> " selection chevron in its own
+// column to the left, so a label never shifts when it becomes selected. Each
+// row's tap box spans the full block width (padded well past the text) for a
+// comfortable, consistent mobile tap target.
+const TITLE_MENU_SCALE = 3;
+const TITLE_MENU_ROW = TITLE_MENU_SCALE * CHARSET_SIZE + 16;
+const TITLE_MENU_PAD = CHARSET_SIZE * 2;
+function titleMenuLayout() {
+  const items = titleMenuItems();
+  const blockH = items.length * TITLE_MENU_ROW;
+  const lowerHalfTop = CAMERA_HEIGHT / 2;
+  const top = lowerHalfTop + (CAMERA_HEIGHT - lowerHalfTop - blockH) / 2;
+  const chevronW = textWidth('>  ', TITLE_MENU_SCALE);   // extra trailing space: a visual gap before the label column
+  const labelW = Math.max(...items.map(item => textWidth(item.sizeLabel || item.label, TITLE_MENU_SCALE)));
+  const blockW = chevronW + labelW;
+  const left = CAMERA_WIDTH / 2 - blockW / 2;
+  return items.map((item, i) => {
+    const y0 = top + i * TITLE_MENU_ROW;
+    return {
+      ...item,
+      textY: y0 + (TITLE_MENU_ROW - TITLE_MENU_SCALE * CHARSET_SIZE) / 2,
+      chevronX: left,
+      labelX: left + chevronW,
+      x0: left - TITLE_MENU_PAD,
+      x1: left + blockW + TITLE_MENU_PAD,
+      y0,
+      y1: y0 + TITLE_MENU_ROW,
+    };
+  });
+}
+
+// Title-screen unicorn: rests offset left of hero's true buffer position
+// (hero.x/y stay authoritative for the camera/terrain the whole time - see
+// drawHero's offsetX/Y params - so a resize mid-hop just re-seats the real
+// spawn under her and the cosmetic offset keeps ticking) until Start fires,
+// then hops the offset back to 0 along a semicircle and hands off to
+// startGame(). RX/RY are separate (not one shared radius) so "slightly
+// offset" and "jump in the air" can be tuned independently.
+const TITLE_JUMP_RX = 60;
+const TITLE_JUMP_RY = 100;
+const TITLE_JUMP_DURATION = 0.5;
+let titleJumpT = 0;         // 0 = resting title pose, 1 = arrived at the real game-start pose
+let titleJumping = false;
+function beginTitleJump() { titleJumping = true; }
+// advanced from update() (a per-screen animation timer, same shape as
+// updateRewind()) - never from processInputs(), which only applies input.
+function updateTitleJump() {
+  titleJumpT = Math.min(1, titleJumpT + elapsedTime / TITLE_JUMP_DURATION);
+  if (titleJumpT >= 1) { titleJumping = false; startGame(); }
+}
+// smoothstep, not linear - a linear theta sweeps constant angular velocity
+// (fast at the apex, slow at the feet), the opposite of how a real hop reads;
+// this fronts the motion at launch and settles it on landing.
+const easeTitleJump = t => t * t * (3 - 2 * t);
+function titleJumpPose() {
+  const t = easeTitleJump(titleJumpT);
+  const theta = Math.PI * (1 - t);
+  return {
+    x: TITLE_JUMP_RX * Math.cos(theta) - TITLE_JUMP_RX,
+    y: -TITLE_JUMP_RY * Math.sin(theta),
+    // 0 (facing right, standing on the surface) at rest -> PI/2 (drilling
+    // pose) on landing, matching the fresh hero startGame() builds - lands
+    // already pointed the way GAME_SCREEN expects, no snap on the handoff frame.
+    angle: t * Math.PI / 2,
+  };
+}
+
+// HIGHSCORE_SCREEN: table over the same dust/hero backdrop as TITLE_SCREEN
+// (see its render() case), reached via the title menu's Highscores item.
+// Doubles as a seed picker - Up/Down/Enter or a tap on a row loads that seed
+// and drops back to the title menu on it (selectSeed) - Start still fires the
+// jump animation from there. A tap elsewhere, or any other key, also returns
+// to the title menu (on whatever seed was already active). highscoreReady is
+// the same "wait for a full release before a fresh
+// press counts" gate as endReady/bootReady, needed because Enter/tap
+// selecting the menu item is often still held down on the very first
+// HIGHSCORE_SCREEN frame.
+let highscoreReady;
+let highscoreIndex = 0;
+function goHighscores() { screen = HIGHSCORE_SCREEN; highscoreReady = false; highscoreIndex = 0; }
+
+// cap the stored table so a pile of one-off seeds (esp. from "New seed")
+// doesn't grow localStorage - and the screen - without bound; see endGame().
+const HIGHSCORE_MAX = 10;
+
+const HS_SCALE = 2.5;   // a touch smaller than the title menu (TITLE_MENU_SCALE) - 3 columns run too wide on mobile at that size
+const HS_ROW = HS_SCALE * CHARSET_SIZE + 10;
+const HS_COL_GAP = CHARSET_SIZE * 2;
+const HS_HEADERS = ['Seed', 'Score', 'Date'];
+
+// highscores are keyed by seed ("terrain-dust", see runSeed/endGame) -
+// flatten to rows and rank by score, best first.
+function highscoreRows() {
+  const table = load('highscores') || {};
+  return Object.keys(table)
+    .map(seed => ({ seed, score: table[seed].score, date: table[seed].date }))
+    .sort((a, b) => b.score - a.score);
+}
+
+// column widths sized off the widest cell (header included) in that column -
+// same "measure before centring" approach as titleMenuLayout's labelW, so a
+// short seed/score/date never leaves a ragged gap before the next column. A
+// chevron gutter (same idea as titleMenuLayout's) sits left of the Seed
+// column so the selected-row marker never shifts the table; each row also
+// gets a titleMenuLayout-style padded tap box spanning the full table width.
+function highscoreLayout() {
+  const data = highscoreRows();
+  const cols = [
+    ['Seed', ...data.map(r => r.seed)],
+    ['Score', ...data.map(r => '' + r.score)],
+    ['Date', ...data.map(r => r.date)],
+  ];
+  const colW = cols.map(vals => Math.max(...vals.map(v => textWidth(v, HS_SCALE))));
+  const chevronW = textWidth('>  ', HS_SCALE);
+  const tableW = chevronW + colW[0] + colW[1] + colW[2] + HS_COL_GAP * 2;
+  const left = CAMERA_WIDTH / 2 - tableW / 2;
+  const colX = [left + chevronW, left + chevronW + colW[0] + HS_COL_GAP, left + chevronW + colW[0] + colW[1] + HS_COL_GAP * 2];
+  const top = CAMERA_HEIGHT / 2 + HS_ROW;   // a row below the surface line, header first
+  const rows = data.map((r, i) => {
+    const y0 = top + (i + 1) * HS_ROW;
+    return { ...r, chevronX: left, x0: left - TITLE_MENU_PAD, x1: left + tableW + TITLE_MENU_PAD, y0, y1: y0 + HS_ROW };
+  });
+  return { rows, colX, top };
+}
+
+// load a highscore row's seed and drop back to TITLE_SCREEN on it (not
+// straight into a run - that would skip the title hop/jump animation) -
+// re-seats + repaints the backdrop same as rerollSeed, so the unicorn/dust
+// shown already match what Start is about to drill into.
+function selectSeed(seed) {
+  const [terrainStr, dustStr] = seed.split('-');
+  applySeed(terrainStr, dustStr);
+  seatSpawn();
+  renderMap();
+  screen = TITLE_SCREEN;
+}
+
+// Iris's title-screen-only speech bubble: a plain white rounded rect (comic-
+// book caption style, no tail) in the sky - below the title, above the
+// surface line (titleMenuLayout's lowerHalfTop) - centred in that band and
+// nudged right of the screen's horizontal centre. Doesn't have to line up
+// exactly with the unicorn/Iris art that lands later.
+const BUBBLE_SCALE = 2;
+const BUBBLE_LINE = BUBBLE_SCALE * CHARSET_SIZE + 6;
+const BUBBLE_PAD = 14;
+const BUBBLE_RADIUS = 12;
+const BUBBLE_MARGIN = 10;    // never let the box itself touch the screen edge, any viewport width
+const BUBBLE_LINES = ['I have a message to deliver.', 'Collect dust to grow', 'a rainbow bridge.'];
+function titleBubbleLayout() {
+  const titleBottom = HUD_LINE + HUD_SCALE * 2 * CHARSET_SIZE + HUD_LINE;   // title's cap-top + cap-height + a margin
+  const surfaceLine = CAMERA_HEIGHT / 2;
+  const textW = Math.max(...BUBBLE_LINES.map(line => textWidth(line, BUBBLE_SCALE)));
+  const textH = BUBBLE_LINES.length * BUBBLE_LINE;
+  const w = textW + BUBBLE_PAD * 2, h = textH + BUBBLE_PAD * 2;
+  const cx = CAMERA_WIDTH / 2 + CAMERA_WIDTH * 0.15, cy = (titleBottom + surfaceLine) / 2;
+  // clamped, not just nudged - on a narrow viewport the unclamped centring
+  // can push the box past the right edge (a long line + a % width nudge both
+  // grow the overflow together); textX re-centres on the clamped box, not
+  // the original cx, so the text never drifts off-centre inside it.
+  const x = clamp(cx - w / 2, BUBBLE_MARGIN, CAMERA_WIDTH - BUBBLE_MARGIN - w);
+  return { x, y: cy - h / 2, w, h, textX: x + w / 2 };
+}
+
+// LOAD is a click-through gate (any key/tap passes it). A key still held from
+// the press that passed it must not fall straight through to whatever's next,
+// so each pass snapshots what's down (bootHeld) and only a key outside that
+// snapshot - or a fresh press after everything's been released (bootReady) -
+// counts. isPointerUp() already consumes the press, so the pointer path needs
+// no extra guard. (TITLE is a real menu now, guarded separately - see
+// titleArmed in processInputs().)
 let bootHeld = [];
 let bootReady;
 function bootGatePassed() {
@@ -647,26 +869,34 @@ function bootGatePassed() {
 }
 
 function processInputs() {
-  // mute toggle, every screen. isKeyUp consumes KeyM on the frame it's pressed
-  // (it releases whatever's down), so the boot gates / konami / steering never
-  // see it. TODO: title-screen menu option, see TODO.md.
-  if (isKeyUp('KeyM')) { muted = !muted; setMuted(muted); }
+  // volume step, every screen (also the title menu's Music item). isKeyUp
+  // consumes KeyM on the frame it's pressed (it releases whatever's down), so
+  // the boot gates / steering never see it.
+  if (isKeyUp('KeyM')) cycleVolume();
 
   switch (screen) {
     case LOAD_SCREEN:
       if (bootGatePassed()) screen = TITLE_SCREEN;
       break;
-    case TITLE_SCREEN:
-      // isKeyUp() consumes the key before the gate sees it, so a konami key
-      // advances the sequence without also starting the game - keep this above
-      // the gate call.
-      if (isKeyUp(konamiCode[konamiIndex])) {
-        konamiIndex++;
-      }
-      if (bootGatePassed()) {
-        startGame();
+    case TITLE_SCREEN: {
+      if (titleJumping) break;   // hopping to the game-start pose - see updateTitleJump(); menu input is moot
+      // the LOAD gate accepts *any* key/tap and doesn't consume it (see
+      // bootGatePassed), so e.g. an Enter press that passed LOAD is still
+      // down here - wait for a full release before the menu reacts, or that
+      // same Enter would instantly fire "Start" and skip the menu entirely.
+      if (!anyKeyDown() && !isPointerDown()) titleArmed = true;
+      if (!titleArmed) break;
+      const items = titleMenuLayout();
+      if (isKeyUp('ArrowUp')) titleIndex = (titleIndex - 1 + items.length) % items.length;
+      if (isKeyUp('ArrowDown')) titleIndex = (titleIndex + 1) % items.length;
+      if (isKeyUp('Enter')) items[titleIndex].action();
+      if (isPointerUp()) {
+        const [px, py] = pointerViewportPosition();
+        const hit = items.findIndex(it => px >= it.x0 && px <= it.x1 && py >= it.y0 && py <= it.y1);
+        if (hit >= 0) { titleIndex = hit; items[hit].action(); }
       }
       break;
+    }
     case GAME_SCREEN: {
       // steering only, no throttle: the drill always thrusts forward along
       // hero.angle (see moveHero). Both input paths pick an ABSOLUTE target
@@ -746,6 +976,30 @@ function processInputs() {
       const freshPress = whichKeyDown().some(k => !endHeld.includes(k));
       if ((endReady || freshPress) && (anyKeyDown() || isPointerUp())) startGame();
       break;
+    case HIGHSCORE_SCREEN: {
+      // same release-then-fresh-press gate as bootGatePassed/endReady (see
+      // highscoreReady above).
+      if (!anyKeyDown() && !isPointerDown()) highscoreReady = true;
+      if (!highscoreReady) break;
+      const { rows } = highscoreLayout();
+      // Up/Down/Enter navigate and replay a row - isKeyUp consumes each key
+      // it fires on, so a held Up/Down/Enter can't also trip the generic
+      // "any other key returns" check below on the same frame.
+      if (rows.length) {
+        if (isKeyUp('ArrowUp')) highscoreIndex = (highscoreIndex - 1 + rows.length) % rows.length;
+        if (isKeyUp('ArrowDown')) highscoreIndex = (highscoreIndex + 1) % rows.length;
+        if (isKeyUp('Enter')) { selectSeed(rows[highscoreIndex].seed); break; }
+      }
+      if (isPointerUp()) {
+        const [px, py] = pointerViewportPosition();
+        const hit = rows.findIndex(r => px >= r.x0 && px <= r.x1 && py >= r.y0 && py <= r.y1);
+        if (hit >= 0) selectSeed(rows[hit].seed);
+        else screen = TITLE_SCREEN;
+        break;
+      }
+      if (anyKeyDown()) screen = TITLE_SCREEN;
+      break;
+    }
   }
 }
 
@@ -763,6 +1017,7 @@ function update() {
       recordTrail();
     }
   }
+  if (screen === TITLE_SCREEN && titleJumping) updateTitleJump();
   if (screen === REWIND_SCREEN) updateRewind();
   // grow the end-of-run rainbow once the score screen is actually up (covers
   // all three ways in: resurface, rewind finishing, resize abandoning a rewind)
@@ -860,6 +1115,22 @@ function endGame(resurfaced) {
   // after the early tally, so it doesn't depend on how many particles had
   // landed. tunnel is px; the metre count is the second term.
   score = SCORE_PER_DUST * dust + SCORE_PER_M * Math.round(tunnel / PX_PER_M);
+
+  // per-seed highscore, keyed by the same "terrain-dust" string as the
+  // shareable URL (runSeed, set in seedMap()) - only touches storage when
+  // this run actually beats what's on record for this seed.
+  const highscores = load('highscores') || {};
+  const best = highscores[runSeed];
+  if (!best || score > best.score) {
+    highscores[runSeed] = { date: new Date().toISOString().slice(0, 10), score };
+    // cap the table at HIGHSCORE_MAX entries, evicting the lowest score(s)
+    // first - keeps storage and the HIGHSCORE_SCREEN table bounded without a
+    // scroll/paging UI.
+    const bySeed = Object.keys(highscores).sort((a, b) => highscores[b].score - highscores[a].score);
+    bySeed.slice(HIGHSCORE_MAX).forEach(seed => delete highscores[seed]);
+    save('highscores', highscores);
+  }
+
   outcome = resurfaced;
   endReady = false;
   endHeld = whichKeyDown();   // steering keys still down at the stall/resurface - refreshed through the rewind (see processInputs), so END_SCREEN knows what's "leftover" vs a fresh restart press
@@ -1332,16 +1603,35 @@ function render() {
         const S = 3, lh = S * CHARSET_SIZE * 2;                    // scale, line advance
         const top = CAMERA_HEIGHT / 2 - (lh + S * CHARSET_SIZE) / 2;   // block centred on the middle
         renderText('Loading complete', CAMERA_WIDTH / 2, top, ALIGN_CENTER, S);
-        renderText(isMobile ? 'Tap the screen' : 'Press any key', CAMERA_WIDTH / 2, top + lh, ALIGN_CENTER, S);
+        renderText(isMobile ? 'Tap to continue' : 'Press any key', CAMERA_WIDTH / 2, top + lh, ALIGN_CENTER, S);
       }
       break;
     case TITLE_SCREEN:
       clearBuffer();
-      renderText('UniDrill Corp', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 - 3 * HUD_LINE, ALIGN_CENTER, HUD_SCALE * 2);
-      renderText(isMobile ? 'Tap to start' : 'Press any key to start', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2, ALIGN_CENTER, 3);
-      if (konamiIndex === konamiCode.length) {
-        renderText('konami mode on', CAMERA_WIDTH - CHARSET_SIZE, CHARSET_SIZE, ALIGN_RIGHT);
+      renderDust();   // the underground dust patches near the spawn column - what Iris's bubble is asking for
+      {
+        const pose = titleJumpPose();
+        drawHero(pose.x, pose.y, pose.angle);
       }
+      // pinned near the top (not vertically centred) to leave the surface -
+      // where the unicorn/Iris/speech-bubble framing will sit - clear below
+      renderText('Errands of Iris', CAMERA_WIDTH / 2, HUD_LINE, ALIGN_CENTER, HUD_SCALE * 2);
+      {
+        const bubble = titleBubbleLayout();
+        renderBubble(bubble.x, bubble.y, bubble.w, bubble.h, BUBBLE_RADIUS);
+        BUBBLE_LINES.forEach((line, i) => {
+          renderText(line, bubble.textX, bubble.y + BUBBLE_PAD + i * BUBBLE_LINE, ALIGN_CENTER, BUBBLE_SCALE, '#000');
+        });
+      }
+      titleMenuLayout().forEach((item, i) => {
+        if (i === titleIndex) renderText('>', item.chevronX, item.textY, ALIGN_LEFT, TITLE_MENU_SCALE);
+        renderText(item.label, item.labelX, item.textY, ALIGN_LEFT, TITLE_MENU_SCALE);
+      });
+      // js13kgames runs entries in an iframe, hiding the URL bar (and with it
+      // the ?seed= theme joke) - a small permanent corner label keeps it
+      // visible regardless. Small/unobtrusive on purpose: not a menu item,
+      // just a credit line.
+      renderText('Seed: ' + runSeed, HUD_X, CAMERA_HEIGHT - SEED_LABEL_SCALE * CHARSET_SIZE - HUD_X, ALIGN_LEFT, SEED_LABEL_SCALE);
       break;
     case GAME_SCREEN:
       clearBuffer();
@@ -1409,11 +1699,30 @@ function render() {
       if (endReady) renderText(isMobile ? 'Tap to play again' : 'Press any key to play again', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + 5 * HUD_LINE, ALIGN_CENTER, HUD_SCALE);
       // renderText(monetizationEarned(), TEXT.width - CHARSET_SIZE, TEXT.height - 2*CHARSET_SIZE, ALIGN_RIGHT);
       break;
+    case HIGHSCORE_SCREEN:
+      // same dust/hero backdrop as TITLE_SCREEN (titleJumpT is still 0 - this
+      // screen is only reachable before Start's jump fires), swapping the
+      // title/bubble/menu for a heading and the score table.
+      clearBuffer();
+      renderDust();
+      {
+        const pose = titleJumpPose();
+        drawHero(pose.x, pose.y, pose.angle);
+      }
+      renderText('Highscores', CAMERA_WIDTH / 2, HUD_LINE, ALIGN_CENTER, HUD_SCALE * 2);
+      {
+        const { rows, colX, top } = highscoreLayout();
+        HS_HEADERS.forEach((h, c) => renderText(h, colX[c], top, ALIGN_LEFT, HS_SCALE));
+        rows.forEach((r, i) => {
+          if (i === highscoreIndex) renderText('>', r.chevronX, r.y0, ALIGN_LEFT, HS_SCALE);
+          renderText(r.seed, colX[0], r.y0, ALIGN_LEFT, HS_SCALE);
+          renderText('' + r.score, colX[1], r.y0, ALIGN_LEFT, HS_SCALE);
+          renderText(r.date, colX[2], r.y0, ALIGN_LEFT, HS_SCALE);
+        });
+      }
+      if (highscoreReady) renderText(isMobile ? 'Tap to return' : 'Press any key to return', CAMERA_WIDTH / 2, CAMERA_HEIGHT - HUD_LINE - CHARSET_SIZE * HUD_SCALE, ALIGN_CENTER, HUD_SCALE);
+      break;
   }
-
-  // audio mute indicator, top-right (no speaker glyph) - every
-  // screen, mirrors the HUD's top-left lines
-  if (muted) renderText('muted', CAMERA_WIDTH - CHARSET_SIZE, CHARSET_SIZE, ALIGN_RIGHT, HUD_SCALE);
 
   blit();
 
@@ -1614,11 +1923,15 @@ function renderParticles() {
 // horn, drawn rigidly (no rag-doll yet). All white but the purple horn/tail.
 // The whole figure corkscrews with the heading (climbing = upside down, by
 // design); collision stays the plain HERO_W/H AABB, a few px of spill is fine.
-function drawHero() {
+// offsetX/Y (buffer-space px) and angle default to hero's own state - the
+// title screen's resting/hopping unicorn is the only caller that overrides
+// them (see titleJumpPose()); every other call site draws hero exactly where
+// it is.
+function drawHero(offsetX = 0, offsetY = 0, angle = hero.angle) {
   const ctx = BUFFER_CTX;
   ctx.save();
-  ctx.translate(hero.x + hero.w / 2, hero.y + hero.h / 2);
-  ctx.rotate(hero.angle);               // +x = drill heading / horn / dig-probe direction
+  ctx.translate(hero.x + hero.w / 2 + offsetX, hero.y + hero.h / 2 + offsetY);
+  ctx.rotate(angle);                    // +x = drill heading / horn / dig-probe direction
   ctx.scale(1.35, 1.35);               // sprite slightly overfills the AABB - the resting silhouette just kisses the tunnel edge (feet ~15px vs the 14px radius), a hair of spill is fine
 
   // legs first (behind the body): slim rects swinging fore/aft, the phase wave
@@ -1740,33 +2053,41 @@ function toggleLoop(value) {
 // filled with SEED_FALLBACK, so a partial "?seed=FOO" still overrides the
 // default. terrain and dust vary independently while a run stays a single
 // shareable string.
-// TODO(highscore): once localStorage lands, slot "last played seed" between
-// the URL param and the default here.
 const SEED_DEFAULT = ['UNICORNS', 'RAINBOWS'];
 const SEED_FALLBACK = 'JS13K2026';
+let runSeed;   // resolved "terrain-dust" string for this run - the highscore table key (see endGame) and the TITLE_SCREEN seed label
+
+// fold a terrain/dust pair into the map generator, record it as runSeed, and
+// reflect it in the URL so the run is shareable (guarded: some embed
+// sandboxes, e.g. js13kgames' iframe, block history writes - which is also
+// why runSeed gets its own on-screen label, see TITLE_SCREEN's render() case).
+function applySeed(terrainStr, dustStr) {
+  setMapSeed(terrainStr, dustStr);
+  runSeed = `${terrainStr}-${dustStr}`;
+  try {
+    const url = new URL(location);
+    url.searchParams.set('seed', runSeed);
+    history.replaceState({}, '', url);
+  } catch (e) {}
+}
 
 function seedMap() {
   const raw = new URLSearchParams(location.search).get('seed');
   let [terrainStr, dustStr] = SEED_DEFAULT;
   if (raw) {
-    const [t, d] = raw.split('-');
+    // uppercase before splitting - matches the all-caps look of the default/
+    // fallback/rerolled seeds (see rerollSeed), so a hand-typed or
+    // lower/mixed-case shared URL still reads the same on the seed label.
+    const [t, d] = raw.toUpperCase().split('-');
     terrainStr = t || SEED_FALLBACK;
     dustStr = d || SEED_FALLBACK;
   }
-  setMapSeed(terrainStr, dustStr);
-
-  // reflect the resolved seed in the URL so the run is shareable
-  // (guarded: some embed sandboxes block history writes)
-  try {
-    const url = new URL(location);
-    url.searchParams.set('seed', `${terrainStr}-${dustStr}`);
-    history.replaceState({}, '', url);
-  } catch (e) {}
+  applySeed(terrainStr, dustStr);
 }
 
 // the real "main" of the game
 onload = async (e) => {
-  document.title = 'UniDrill Corp';
+  document.title = 'Errands of Iris';
 
   seedMap();
   onresize();

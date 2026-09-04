@@ -13,37 +13,14 @@ as they land — this list stays scoped to open work.
       track (staged de-risk plan — static loop first, confirmed good; couple to
       `hero.momentum` next, then evaluate). Layered stems were considered and
       dropped (one intensity, not worth the bytes).
-- [ ] Options menu on the title screen. Currently the only setting is mute,
-      toggled with **M** (mutes music + SFX via the master gain in sound.js,
-      shows "muted" top-right — see `muted` in game.js). Give TITLE a small
-      options panel listing each setting with its shortcut (mute/M for now,
-      room for SFX vs music split, volume, control scheme later). Ties in
-      with the "Errand of Iris" title-screen rework below. Consider
-      persisting mute via the storage helper.
-
-- [ ] Player sprite. Replace the blue cube with a stylized unicorn drawn at
-      runtime with canvas primitives (rects + paths), not a bitmap sprite:
-      square head, triangle horn/drill, rectangle body + tail, slim
-      rectangles for legs. All white except the horn and tail, which are
-      purple. Head/body/tail are a loose rag-doll chain (each lags the one
-      ahead). Legs wiggle like digging/swimming, wiggle rate proportional to
-      player speed (`hero.momentum`). Keep the collision AABB (`HERO_W/H`)
-      as-is; this is render-only.
-- [ ] Seed sharing UI. The underground generation is now seeded and the
-      spawn is deterministic per seed (see CHANGELOG — `seedMap()` /
-      `setMapSeed()`, two-seed `?seed=terrain-dust` param, default
-      `UNICORNS-RAINBOWS`, `pickSpawnX`/`seatSpawn`). Still missing: a
-      title-screen "share your seed" control (helper in src/js/share.js —
-      the resolved seed is already written to the URL, so this is mostly a
-      button) and a "new seed" roll for replayability.
-- [ ] Highscore. Using the storage helper (src/js/storage.js) under key
-      `2026.unidrill`, keep a hash of `{ highscore, date }` keyed by seed.
-      Lets us show a highscore list and let the player reload a past seed
-      to try to beat their score. (Storage helper prefix is currently
-      hardcoded to `2020.workingTitle` — needs updating.)
-      When this lands, wire "last played seed" into `seedMap()` in game.js
-      (between the URL param and the themed default) so a return visit with
-      no `?seed` resumes the last map instead of UNICORNS/RAINBOWS.
+- [ ] Seed sharing UI. The underground generation is seeded and the spawn is
+      deterministic per seed (see CHANGELOG — `seedMap()`/`setMapSeed()`,
+      two-seed `?seed=terrain-dust` param, default `UNICORNS-RAINBOWS`,
+      `pickSpawnX`/`seatSpawn`). The title menu's "New seed" item already
+      rerolls a fresh random pair for replayability, and the resolved seed is
+      shown on the title screen (see CHANGELOG — Highscore). Still missing:
+      an explicit "share your seed" control (helper in src/js/share.js) — the
+      seed is already in the URL, so this is mostly a share/copy button.
 
 ## Bugs
 
@@ -98,33 +75,28 @@ as they land — this list stays scoped to open work.
       ~40–50% headroom, so keep them for now — handy for re-tuning the
       `CAMERA_*` constants and the pointer `RAMP`/`DEAD`. (Keep the plain
       base+knob D-pad overlay — that's the shipped control, not debug.)
-- [ ] Name the game **Errand of Iris** and build the light framing around it.
-      Decided — replaces the "UniDrill Corp" working title (avoids the
-      "unicorn"/"rainbow"/"prism" words every other entry will lean on).
-      Iris is the Greek goddess of the rainbow and messenger of the gods,
-      who travels *along* the rainbow — but nobody in-game needs to know
-      that; the framing is carried by two small in-game beats, not backstory:
-      - Title screen: the LOAD → TITLE → GAME flow now exists (see CHANGELOG)
-        but TITLE just shows "unidrill corp" + a start prompt. Give it a line
-        or two setting up the errand — Iris has a message to deliver, she can
-        only travel by rainbow, build her one from the ground up. The bigger
-        the rainbow, the happier she is. Rename LOAD/TITLE copy to match.
+- [ ] Draw Iris and animate her on the title and end screens. The title-
+      screen framing (name, copy, speech bubble) has landed — see CHANGELOG,
+      "Errands of Iris title screen" — but Iris herself is still only implied
+      by that text bubble, not drawn. Needs her own small canvas sprite (same
+      spirit as the player unicorn), then:
+      - Title screen: place her somewhere in the scene the bubble is coming
+        from (next to it, or she's the one "saying" it).
       - End screen: after the sky rainbow finishes drawing itself in, Iris
         walks it — on at the near foot, over the apex, off toward her
         destination. How far she gets / how sprightly she looks scales with
         the rainbow size (i.e. dust collected): a big haul carries her clean
         over, a thin arc leaves her trudging. Zero dust → no rainbow, she
         just waits at the tunnel mouth (what `dry run!` reacts to). Gets the
-        grander arc on the double-rainbow resurface. Render-only, a small
-        canvas figure in the same spirit as the player unicorn.
+        grander arc on the double-rainbow resurface.
       - The end headline becomes Iris's reaction to the rainbow, not a
         neutral status — warm line scaled to the haul at the top, `dry run!`
         at zero. (`well dug!` / `dry run!` are the current placeholders.)
-      Player is still the unicorn drill; Iris is only ever an NPC who shows
-      up at the end. When this lands, sync DESIGN.md — Premise, Run end /
-      score headline, and a new end-screen "Iris crossing" beat.
-      Other names considered and dropped: Gusher, Bloomshaft, "Colours Shall
-      Rise", Bloomwright, Arcus, "Seven Below".
+      Player is still the unicorn drill; Iris is only ever an NPC. When this
+      lands, sync DESIGN.md — Run end / score headline, and a new end-screen
+      "Iris crossing" beat.
+      Other names considered and dropped for the title: Gusher, Bloomshaft,
+      "Colours Shall Rise", Bloomwright, Arcus, "Seven Below".
 - [ ] Add gamepad support. There's prior art in Jerome's old veggie-ninja repo:
       https://github.com/herebefrogs/veggie-ninja/blob/master/src/js/gamepad.js
       (and possibly an older commit in gamejam-boilerplate's own history).

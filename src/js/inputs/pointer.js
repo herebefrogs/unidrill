@@ -97,7 +97,7 @@ function deflect(d) {
 
 export const isPointerDown = () => pointerDownTime;
 
-export const isPointerUp = () => isPointerDown() ? pointerDownTime = 0 || true : false;
+export const isPointerUp = () => isPointerDown() ? (pointerDownTime = 0) || true : false;
 
 export const pointerScreenPosition = () => [x, y];
 

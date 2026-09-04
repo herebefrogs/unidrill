@@ -49,8 +49,6 @@ The game is automatically paused if the player change browser tab (`onvisibility
 Keyboard control is achieved by the `onkeydown` and `onkeyup` event handlers, which only record the direction in which the player wants to move so as no to block the event thread.
 Mouse and touchscreen support is achieved by the `ontouchstart/onpointerdown`, `ontouchmove/onpointermove` and `ontouchend/onpointerup` event handlers.
 
-The boilerplate will recognize the Konami code on the title screen. You're then free to enable any behaviour or cheat you see fit.
-
 Understanding the build script
 ------------------------------
 The build script starts by wiping clean the `dist` directory. That's where it will serve the game from during development, and where it will save the game's optimized ZIP for gamejam submission.
