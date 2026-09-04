@@ -131,7 +131,11 @@ one that starts *during* the rewind — fast-forwards straight to the end; a key
 still held from gameplay doesn't count (and releasing it costs nothing), so
 the player always sees the cutscene at least once. It normally lands on the
 ingress mouth (`trail[0]`); a resurface that earned the double rainbow lands
-on the two-hole midpoint instead.
+on the two-hole midpoint instead. **One exception:** a resurface with an
+empty dust counter skips the rewind entirely and cuts straight to the score —
+there's no rainbow to flood and the drill's already at the surface, so the
+walk-back would show off nothing (END_SCREEN then draws the drill where it
+surfaced, the same as a resize that abandoned a rewind mid-play).
 
 **Rainbow flood.** As the rewind camera retreats up the tunnel, the shaft
 fills with rainbow behind it — a rising front that follows the drilled route
@@ -148,7 +152,10 @@ REWIND→END_SCREEN handoff. The flood stays visible under the sprouting sky
 rainbow on END_SCREEN. It advances in `TRAIL_STEP` (4-cell) chunks; a rewind
 skip floods the whole remaining path in one frame. A resurface runs the same
 rewind (it just starts at the egress hole, not deep), so its tunnel fills
-progressively too. `fillDust` scans a generous radius (a full drill width,
+progressively too. A run that bagged **no dust** floods nothing — a stall
+still rewinds the camera to show the dig, but with no rainbow behind it
+(`rewindFillI` starts at 0 so the fill front never chases the cursor); a
+dry-run resurface skips the rewind altogether (above). `fillDust` scans a generous radius (a full drill width,
 2× the dig radius) around each breadcrumb: the `trail` is coarse, so its
 straight chords cut inside the drilled arc on rounded turns and a
 tight-radius scan would leave black pixels on the outer edge of a bend — the

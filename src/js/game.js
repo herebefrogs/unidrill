@@ -830,6 +830,16 @@ function endGame(resurfaced) {
   rainbowX2 = undefined;   // set just below only if a resurface earns the double
   rainbowT = 0;
 
+  // dry run + resurfaced: no dust bagged means no rainbow to flood, and the
+  // drill's already at the surface - there's nothing for the rewind to show
+  // off. Cut straight to the score (same shortcut as a resize abandoning a
+  // rewind: rewound=false, so END_SCREEN draws the drill where it surfaced).
+  if (!dust && resurfaced) {
+    rewound = false;
+    screen = END_SCREEN;
+    return;
+  }
+
   // close the trail at the exact stop position, then rewind the camera back
   // down it - the walk-back that shows off the dig and progressively floods the
   // tunnel with rainbow (updateRewind / rewindFillI). BOTH endings get it: a
@@ -854,7 +864,10 @@ function endGame(resurfaced) {
     pathLen += Math.hypot(trail[i] - trail[i - 2], trail[i + 1] - trail[i - 1]);
   }
   rewindI = trail.length / 2 - 1;
-  rewindFillI = rewindI;   // rainbow fill starts at the far end, drains up behind the camera
+  // rainbow fill starts at the far end, drains up behind the camera - UNLESS no
+  // dust was bagged (a stall with an empty counter): rewind the camera to show
+  // the dig, but flood no rainbow. 0 never chases rewindI down, so nothing fills.
+  rewindFillI = dust ? rewindI : 0;
   rewindT = 0;
   rewindSkip = false;
   rewindArmed = false;
