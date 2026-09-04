@@ -390,14 +390,38 @@ the drill stalling out, the end-run rainbow sprouting — are still TODO.
 
 ## Replayability
 
-The underground has its own dedicated seeded generator, separate from every
-other use of randomness in the game — it must not draw from the shared
-`utils.js` PRNG; anything else needing randomness gets its own generator.
-It's seeded from a string: default `JS13K2026`, with `RAINBOWS` and
-`UNICORNS` shipped as alternates, plus title-screen options to share the
-current seed (`share.js`) and roll a fresh one. Per-seed high scores are
-kept under the `2026.unidrill` storage key (`storage.js`) so a player can
-reload an old seed to beat their score.
+The underground has its own dedicated seed, separate from every other use of
+randomness in the game — it must not draw from the shared `utils.js` PRNG;
+anything else needing randomness gets its own generator.
+
+The seed is **two strings**, folded to uint32 constants and mixed into
+`hash2D`: one shapes the terrain (macro sections + rock blobs), one the dust
+field, so they can be rerolled independently. They ride one URL param,
+`?seed=terrain-dust`:
+
+| `?seed=` | terrain / dust |
+|---|---|
+| *(absent)* | `UNICORNS` / `RAINBOWS` — the themed default |
+| `A-B` | `A` / `B` |
+| `A` or `A-` | `A` / `JS13K2026` |
+| `-B` | `JS13K2026` / `B` |
+
+`seedMap()` resolves this, calls `setMapSeed()`, and writes the resolved pair
+back to the URL so any run is a shareable link. (Seed 0 — unreachable through
+`seedMap` — reproduces the original unseeded map.)
+
+Still TODO: a title-screen control to share the current seed (`share.js`) and
+roll a fresh one, and per-seed high scores under the `2026.unidrill` storage
+key (`storage.js`) so a player can reload an old seed to beat their score.
+
+**Deterministic spawn.** The drill starts buffer-centred (so the camera seats
+on it at any viewport size) with `mapOffsetX` carrying its world position. A
+bare buffer-centred spawn would land at world-x `CAMERA_WIDTH` — which moves
+with the window and could sit inside a rock — so `pickSpawnX()` walks right
+from world-x 0 in ~drill-width steps until the column the drill will cut is
+clay-free, and `mapOffsetX` is set to put the drill there. `seatSpawn()`
+applies this same seating to the boot title backdrop, so the LOAD/TITLE →
+GAME transition shows one continuous frame.
 
 ---
 
@@ -443,9 +467,9 @@ off `hash2D`, a *stateless* deterministic hash of an integer coordinate
 pair returning a value in `[0, 1)` — output depends only on the coords, so
 call order and count never matter (this is why terrain and dust can share
 it freely, and why transient randomness must **not** — it belongs in
-`utils.js`'s stateful PRNG). The run's seed will be mixed into `hash2D`
-(see Replayability) — not wired yet, so every run currently generates the
-same map. Two passes:
+`utils.js`'s stateful PRNG). The run's two seeds (terrain, dust) are folded
+into `hash2D` — as fixed-at-boot constants, so it stays a pure function of
+`(x,y)` within a run (see Replayability). Two passes:
 
 **Macro pattern pass.** The world is cut into large square sections
 (`SECTION_SIZE`, currently 480px). Each section deterministically rolls one

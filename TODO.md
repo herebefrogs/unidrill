@@ -29,18 +29,21 @@ as they land — this list stays scoped to open work.
       ahead). Legs wiggle like digging/swimming, wiggle rate proportional to
       player speed (`hero.momentum`). Keep the collision AABB (`HERO_W/H`)
       as-is; this is render-only.
-- [ ] RNG seeds. Give the underground generation its own seeded RNG,
-      initialized from the string `JS13K2026`. Nothing else may draw from
-      the underground RNG — if some other system needs randomness, spin up
-      a separate generator for it. Title screen needs a "share your seed"
-      option (there's a helper in src/js/share.js) and a way to generate
-      fresh seeds for replayability. Ship a few hand-picked seeds too:
-      `JS13K2026`, `RAINBOWS`, `UNICORNS`.
+- [ ] Seed sharing UI. The underground generation is now seeded and the
+      spawn is deterministic per seed (see CHANGELOG — `seedMap()` /
+      `setMapSeed()`, two-seed `?seed=terrain-dust` param, default
+      `UNICORNS-RAINBOWS`, `pickSpawnX`/`seatSpawn`). Still missing: a
+      title-screen "share your seed" control (helper in src/js/share.js —
+      the resolved seed is already written to the URL, so this is mostly a
+      button) and a "new seed" roll for replayability.
 - [ ] Highscore. Using the storage helper (src/js/storage.js) under key
       `2026.unidrill`, keep a hash of `{ highscore, date }` keyed by seed.
       Lets us show a highscore list and let the player reload a past seed
       to try to beat their score. (Storage helper prefix is currently
       hardcoded to `2020.workingTitle` — needs updating.)
+      When this lands, wire "last played seed" into `seedMap()` in game.js
+      (between the URL param and the themed default) so a return visit with
+      no `?seed` resumes the last map instead of UNICORNS/RAINBOWS.
 
 ## Bugs
 

@@ -193,6 +193,33 @@ Roughly in build order, oldest first.
       off by default (see TODO.md Later/revisit: "Delete the camera-tuning debug
       overlay"). See DESIGN.md "Graphics — Camera".
 
+- [x] RNG seeds — generation half (was "RNG seeds"; the title-screen share/roll
+      UI and per-seed high scores stay open as TODO "Seed sharing UI" and
+      "Highscore"). `hash2D` now folds two per-run uint32 constants: `terrainSeed`
+      (every caller by default) and `dustSeed` (dust pass, via a `dustHash`
+      wrapper), from `setMapSeed()`/`foldSeed` (xfnv1a, mirrors `utils.seedRand`).
+      It stays a *pure function of `(x,y)` within a run* — no stream, so
+      re-sampling a cell on repaint is stable and two runs down different paths
+      get identical terrain (this is why a stateful PRNG was rejected here — see
+      the two-RNG memory). `game.js` `seedMap()` resolves one URL param
+      `?seed=terrain-dust`: no param → themed default `UNICORNS-RAINBOWS`; a
+      present param is split on `-` and empty halves filled with `JS13K2026`
+      (so `?seed=FOO` → terrain FOO / dust JS13K2026). The resolved pair is
+      written back to the URL (guarded `history.replaceState`) so every run is a
+      shareable link. Seed 0 is unreachable from `seedMap` and reproduces the
+      pre-seed map.
+      Deterministic spawn: the drill spawns buffer-centred (camera seats on it
+      at any viewport) with `mapOffsetX` carrying its world-x. A bare
+      buffer-centred spawn lands at world-x `CAMERA_WIDTH` — viewport-dependent,
+      possibly inside a rock — so `pickSpawnX()` walks right from world-x 0 in
+      `SPAWN_STEP` (32px, ~HERO_W, cell-aligned) jumps until the drill's column
+      `[x−HERO_W/2, x+HERO_W/2] × [0, HERO_H*4]` is clay-free (capped 2048px).
+      `seatSpawn()` does the hero+camera+`mapOffsetX` seating and is shared by
+      `startGame()` and the boot title backdrop (onload + a LOAD/TITLE resize),
+      so LOAD/TITLE → GAME is one continuous frame — previously the title sat on
+      a placeholder-`CAMERA_WIDTH` world column ~1 viewport off the real spawn.
+      See DESIGN.md "Replayability".
+
 ## Playtest / gameplay balancing
 
 - [x] Steering model — absolute direction vs. bank. RESOLVED: playtesters

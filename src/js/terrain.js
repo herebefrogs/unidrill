@@ -12,12 +12,38 @@ const MATERIAL_COLOR = ['#e0c088', '#96633c'];
 // A baseline entropy term (material-independent) is added on top in game.js.
 export const MATERIAL_DRAG = [90, 300];
 
-// deterministic 2D hash, returns a value in [0, 1)
-const hash2D = (x, y) => {
-  let h = Math.imul(x, 374761393) ^ Math.imul(y, 668265263);
+// ---- run seed --------------------------------------------------------
+// Two seed strings, each folded to a uint32 constant mixed into hash2D:
+// one shapes the terrain (macro sections + rock blobs), one the dust
+// field. setMapSeed() is called once at boot from the URL seed (game.js);
+// the values never change during a run, so hash2D stays a pure function of
+// (x, y) within a run — order-independent, safe to re-sample on repaint.
+// Both default to 0, which leaves the hash identical to the unseeded map.
+let terrainSeed = 0;
+let dustSeed = 0;
+
+// xfnv1a fold of a string to a uint32 (same construction as utils' seedRand)
+const foldSeed = str => {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
+  return h >>> 0;
+};
+
+export const setMapSeed = (terrainStr, dustStr) => {
+  terrainSeed = foldSeed(terrainStr);
+  dustSeed = foldSeed(dustStr);
+};
+
+// deterministic 2D hash keyed on (x, y, seed), returns a value in [0, 1).
+// The dust pass calls it through dustHash() (dustSeed); every other caller
+// takes terrainSeed by default. seed 0 => Math.imul(x ^ 0, …) / (y + 0),
+// i.e. the original unseeded hash.
+const hash2D = (x, y, seed = terrainSeed) => {
+  let h = Math.imul(x ^ seed, 374761393) ^ Math.imul(y + seed, 668265263);
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 };
+const dustHash = (x, y) => hash2D(x, y, dustSeed);
 
 // --- macro pattern pass -------------------------------------------------
 // the map is first divided into large sections; each section deterministically
@@ -150,7 +176,7 @@ const DUST_PATCH = [
 // amp/phase drive the same two-harmonic radius wobble as the rock blobs
 // (see dustContains) so the patch outline is lumpy, not a clean circle.
 const dustPatchAt = (gx, gy) => {
-  const roll = hash2D(gx + 54812, gy + 54812);
+  const roll = dustHash(gx + 54812, gy + 54812);
   let acc = 0, cat = 0;
   for (; cat < DUST_WEIGHTS.length - 1; cat++) {
     acc += DUST_WEIGHTS[cat];
@@ -160,13 +186,13 @@ const dustPatchAt = (gx, gy) => {
   if (!cfg) return null;
   return {
     cat,
-    x: (gx + hash2D(gx + 7, gy + 7)) * DUST_CELL,
-    y: (gy + hash2D(gx + 7, gy + 11)) * DUST_CELL,
-    r: cfg.minR + hash2D(gx + 13, gy + 7) * (cfg.maxR - cfg.minR),
-    amp1: 0.20 + hash2D(gx + 17, gy + 7) * 0.20,
-    phase1: hash2D(gx + 7, gy + 17) * 6.28,
-    amp2: 0.08 + hash2D(gx + 23, gy + 7) * 0.12,
-    phase2: hash2D(gx + 7, gy + 23) * 6.28,
+    x: (gx + dustHash(gx + 7, gy + 7)) * DUST_CELL,
+    y: (gy + dustHash(gx + 7, gy + 11)) * DUST_CELL,
+    r: cfg.minR + dustHash(gx + 13, gy + 7) * (cfg.maxR - cfg.minR),
+    amp1: 0.20 + dustHash(gx + 17, gy + 7) * 0.20,
+    phase1: dustHash(gx + 7, gy + 17) * 6.28,
+    amp2: 0.08 + dustHash(gx + 23, gy + 7) * 0.12,
+    phase2: dustHash(gx + 7, gy + 23) * 6.28,
   };
 };
 

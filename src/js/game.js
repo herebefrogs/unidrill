@@ -10,7 +10,7 @@ import SONG_TITLE from './song-title';
 import { save, load } from './storage';
 import { ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, CHARSET_SIZE, initCharset, renderText, initTextBuffer, clearTextBuffer, renderAnimatedText } from './text';
 import { clamp, getRandSeed, setRandSeed, loadImg, lerp } from './utils';
-import { CELL_SIZE, sampleMaterial, materialColor, MATERIAL_DRAG, sampleDust, DUST_NONE, DUST_DENSE } from './terrain';
+import { CELL_SIZE, CLAY, sampleMaterial, materialColor, MATERIAL_DRAG, sampleDust, DUST_NONE, DUST_DENSE, setMapSeed } from './terrain';
 import TILESET from '../img/tileset.webp';
 
 
@@ -409,12 +409,44 @@ function unlockExtraContent() {
   // NOTE: remember to update the value of the monetization meta tag in src/index.html to your payment pointer
 }
 
+// world-x the drill descends from. The hero always spawns buffer-centred (so
+// the camera seats on it whatever the viewport size), and mapOffsetX carries
+// its world position — but a bare buffer-centred spawn lands at world-x
+// CAMERA_WIDTH, which moves with the window and could drop the drill into a
+// rock. Instead: walk right in SPAWN_STEP jumps until the column the drill
+// will cut ([x - HERO_W/2, x + HERO_W/2] over the first HERO_H*4 of descent)
+// is clay-free. Deterministic — same seed, same column, whatever the window.
+const SPAWN_STEP = 32;   // ~HERO_W, CELL_SIZE-aligned so mapOffsetX stays on the cell grid
+function pickSpawnX() {
+  for (let x = 0; x < SPAWN_STEP * 64; x += SPAWN_STEP) {
+    let clear = true;
+    for (let sx = x - HERO_W / 2; sx < x + HERO_W / 2; sx += CELL_SIZE)
+      for (let sy = 0; sy < HERO_H * 4; sy += CELL_SIZE)
+        if (sampleMaterial(sx + CELL_SIZE / 2, sy + CELL_SIZE / 2) === CLAY) clear = false;
+    if (clear) return x;
+  }
+  return 0;   // pathological: nothing clear within 2048px, take the origin
+}
+
+// Seat the world on the clay-free spawn column: hero buffer-centred, mapOffsetX
+// carrying its world-x, camera hard-locked on it. Shared by startGame() and the
+// boot title backdrop (onload / a resize on LOAD|TITLE) so LOAD/TITLE -> GAME
+// shows one continuous frame - without it the title sits on the raw 0,0 column,
+// which may be rock, and the drill visibly jumps when startGame() walks clear.
+function seatSpawn() {
+  cameraX = cameraY = 0;
+  mapOffset = 0;
+  mapOffsetX = pickSpawnX() - CAMERA_WIDTH;   // buffer-centred hero (x = CAMERA_WIDTH - HERO_W/2) then sits at the clear world-x
+  hero.x = CAMERA_WIDTH - HERO_W / 2;
+  hero.y = SURFACE_Y - HERO_H;
+  hero.velX = hero.velY = 0;
+  followCamera();                             // hard lock (no smooth): snaps focus + zeroes spring velocity
+}
+
 function startGame() {
   // setRandSeed(getRandSeed());
   // if (isMonetizationEnabled()) { unlockExtraContent() }
   konamiIndex = 0;
-  cameraX = cameraY = 0;
-  mapOffset = mapOffsetX = 0;
   DUG.clear();
   FILLED.clear();
   hero = {
@@ -428,6 +460,7 @@ function startGame() {
     momentum: MOMENTUM.initial,
     legPhase: 0,
   };
+  seatSpawn();                       // mapOffsetX + camera onto the clay-free spawn column
   heroWentDeep = false;
   outcome = undefined;
   depth = 0;
@@ -437,7 +470,6 @@ function startGame() {
   particles = [];
   trail = [hero.x + hero.w / 2 + mapOffsetX, hero.y + hero.h / 2 - SURFACE_Y + mapOffset];
   prevDrill = trail.slice();        // drill centre last frame - starts above the surface, see digShaft
-  followCamera();                   // seat the viewport on the freshly-centred hero
   renderMap();
   screen = GAME_SCREEN;
 };
@@ -1690,11 +1722,43 @@ function toggleLoop(value) {
 
 // EVENT HANDLERS
 
+// Resolve the run seed and hand it to the terrain generator. One URL param
+// carries both halves as "terrain-dust". No param -> the themed default
+// (UNICORNS / RAINBOWS). A non-empty param is parsed and any missing half
+// filled with SEED_FALLBACK, so a partial "?seed=FOO" still overrides the
+// default. terrain and dust vary independently while a run stays a single
+// shareable string.
+// TODO(highscore): once localStorage lands, slot "last played seed" between
+// the URL param and the default here.
+const SEED_DEFAULT = ['UNICORNS', 'RAINBOWS'];
+const SEED_FALLBACK = 'JS13K2026';
+
+function seedMap() {
+  const raw = new URLSearchParams(location.search).get('seed');
+  let [terrainStr, dustStr] = SEED_DEFAULT;
+  if (raw) {
+    const [t, d] = raw.split('-');
+    terrainStr = t || SEED_FALLBACK;
+    dustStr = d || SEED_FALLBACK;
+  }
+  setMapSeed(terrainStr, dustStr);
+
+  // reflect the resolved seed in the URL so the run is shareable
+  // (guarded: some embed sandboxes block history writes)
+  try {
+    const url = new URL(location);
+    url.searchParams.set('seed', `${terrainStr}-${dustStr}`);
+    history.replaceState({}, '', url);
+  } catch (e) {}
+}
+
 // the real "main" of the game
 onload = async (e) => {
   document.title = 'UniDrill Corp';
 
+  seedMap();
   onresize();
+  seatSpawn();   // seat the title backdrop on the frame startGame() will open on
   //checkMonetization();
 
   await initCharset();
@@ -1767,6 +1831,10 @@ onresize = onrotate = function() {
   // new buffer and repaint from mapOffset/mapOffsetX + DUG (onload does its own
   // initial renderMap() after this for the no-realloc case)
   if (buffersChanged) reanchorBuffer();
+
+  // on the boot screens there's no run to preserve - re-seat the backdrop on
+  // the (viewport-dependent) spawn frame so it stays matched to startGame()
+  if (buffersChanged && screen < GAME_SCREEN) { seatSpawn(); renderMap(); }
 
   // fix key events not received on itch.io when game loads in full screen
   window.focus();
