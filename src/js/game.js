@@ -8,7 +8,7 @@ import { initSpeech } from './speech';
 import SONG_GAME from './song-game';
 import SONG_TITLE from './song-title';
 import { save, load } from './storage';
-import { ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, CHARSET_SIZE, initCharset, renderText, initTextBuffer, clearTextBuffer, renderAnimatedText } from './text';
+import { ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, CHARSET_SIZE, renderText, textWidth, initTextBuffer, clearTextBuffer } from './text';
 import { clamp, getRandSeed, setRandSeed, loadImg, lerp } from './utils';
 import { CELL_SIZE, CLAY, sampleMaterial, materialColor, MATERIAL_DRAG, sampleDust, DUST_NONE, DUST_DENSE, setMapSeed } from './terrain';
 import TILESET from '../img/tileset.webp';
@@ -189,13 +189,12 @@ const DEBUG_POINTER = false;
 // unbounded both ways so nothing is walled off, you just see less of it at
 // once. Larger value = chunkier sprites, less world on screen.
 //   COUPLED WITH HUD_SCALE: the widest HUD string must fit in CAMERA_WIDTH.
-//   Current worst cases: "well dug!" at HUD_SCALE+1 (9 chars, ~320 world px
-//   centred), "press any key" / "score: 99999" at HUD_SCALE (13 chars,
-//   ~356 centred). At RENDER_SCALE 1 a ~393px phone gives ~392 world px -
-//   little margin. Raising RENDER_SCALE shrinks CAMERA_WIDTH, so bump it only
-//   together with a matching drop in HUD_SCALE, checked on the narrowest
-//   target. (The old "tapped out!" headline at 11 chars/HUD_SCALE+1 was the
-//   binding constraint; "well drilled!" at 13 would have overflowed it.)
+//   Worst case is the centred END retry line "Press any key to play again" at
+//   HUD_SCALE. Condensed Impact is far narrower than the old bitmap cell so
+//   there's margin (a ~393px phone at RENDER_SCALE 1 sees ~392 world px), but
+//   that line is close - check it on the narrowest target if it grows.
+//   Raising RENDER_SCALE shrinks CAMERA_WIDTH, so bump it only together with a
+//   matching drop in HUD_SCALE.
 const RENDER_SCALE = 1;
 const VIEW_MIN = 256;                   // clamp floor for either viewport axis - only guards absurdly small windows; a clamped axis means letterbox (see resizeViewport), so keep it below every real device
 const VIEW_MAX = 2048;                  // clamp ceiling on either viewport axis: the 2x scroll buffer is then 4096, the safe canvas-dimension cap (iOS Safari). 4K-and-up displays pillarbox/letterbox the excess.
@@ -371,17 +370,19 @@ const RAINBOW_DOUBLE_MIN = 0.25, RAINBOW_DOUBLE_MAX = 0.85;
 // the outer overshoots its far hole by this, the inner falls this short - so
 // each bow stays visibly pinned to its own hole rather than both bridging.
 const RAINBOW_DOUBLE_OVERSHOOT = 0.15;
-const HUD_SCALE = 3;                                  // bitmap-font magnification for the in-game HUD lines
+let TEXT = initTextBuffer(c, CAMERA_WIDTH, CAMERA_HEIGHT);  // text buffer; re-allocated in resizeViewport() on rotate/resize
+
+const HUD_SCALE = 3;                                  // text box-height multiplier for the in-game HUD lines
 const HUD_LINE = HUD_SCALE * CHARSET_SIZE + 4;        // px between stacked HUD lines
 const HUD_X = CHARSET_SIZE;                           // left-aligned HUD origin (labels stay put as values gain/lose digits)
-const HUD_ADVANCE = HUD_SCALE * (CHARSET_SIZE + 1);   // px per glyph at HUD_SCALE
-const DUST_COUNTER_X = HUD_X + 7 * HUD_ADVANCE;       // where the 'dust:  ' value starts (also the particles' flight target)
+// shared value column for the Speed and Dust lines (one label-field past HUD_X,
+// widest label wins) - the value is split off its label so only the number
+// swells in the pop. Also the dust particles' flight target.
+const SPEED_VALUE_X = HUD_X + Math.max(textWidth('Speed: ', HUD_SCALE), textWidth('Dust: ', HUD_SCALE));
+const DUST_COUNTER_X = SPEED_VALUE_X;
 const DUST_COUNTER_Y = CHARSET_SIZE + 2 * HUD_LINE;   // 3rd HUD line (speed, shaft, dust)
 const DUST_POP_DURATION = 0.18;                       // seconds: the counter value swells to 2x and back on each tally
-const SPEED_VALUE_X = HUD_X + 7 * HUD_ADVANCE;        // where the 'speed: ' value starts, split off its label so only the number swells in the overtorque pop
 const SPEED_VALUE_Y = CHARSET_SIZE;                   // 1st HUD line
-
-let TEXT = initTextBuffer(c, CAMERA_WIDTH, CAMERA_HEIGHT);  // text buffer; re-allocated in resizeViewport() on rotate/resize
 
 
 const ATLAS = {};
@@ -1327,12 +1328,17 @@ function render() {
       // (MAP isn't copied here, so clearBuffer() would leave stale pixels).
       BUFFER_CTX.fillStyle = '#000';
       BUFFER_CTX.fillRect(Math.floor(cameraX), Math.floor(cameraY), CAMERA_WIDTH + 1, CAMERA_HEIGHT + 1);
-      renderText(isMobile ? 'tap the screen' : 'press any key', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2, ALIGN_CENTER);
+      {
+        const S = 3, lh = S * CHARSET_SIZE * 2;                    // scale, line advance
+        const top = CAMERA_HEIGHT / 2 - (lh + S * CHARSET_SIZE) / 2;   // block centred on the middle
+        renderText('Loading complete', CAMERA_WIDTH / 2, top, ALIGN_CENTER, S);
+        renderText(isMobile ? 'Tap the screen' : 'Press any key', CAMERA_WIDTH / 2, top + lh, ALIGN_CENTER, S);
+      }
       break;
     case TITLE_SCREEN:
       clearBuffer();
-      renderText('unidrill corp', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 - 2 * HUD_LINE, ALIGN_CENTER, HUD_SCALE);
-      renderText(isMobile ? 'tap to start' : 'press any key to start', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2, ALIGN_CENTER);
+      renderText('UniDrill Corp', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 - 3 * HUD_LINE, ALIGN_CENTER, HUD_SCALE * 2);
+      renderText(isMobile ? 'Tap to start' : 'Press any key to start', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2, ALIGN_CENTER, 3);
       if (konamiIndex === konamiCode.length) {
         renderText('konami mode on', CAMERA_WIDTH - CHARSET_SIZE, CHARSET_SIZE, ALIGN_RIGHT);
       }
@@ -1342,23 +1348,23 @@ function render() {
       renderDust();
       renderParticles();
       drawHero();
-      renderText('speed:', HUD_X, SPEED_VALUE_Y, ALIGN_LEFT, HUD_SCALE);
+      renderText('Speed:', HUD_X, SPEED_VALUE_Y, ALIGN_LEFT, HUD_SCALE);
       // value drawn separately so only the number swells (2x and back) while
       // momentum sits in the overtorque band - scale tracks how far past `max`
       // it is, so the pop rides the dense-patch boost up and its bleed down.
       {
         const str = Math.round(hero.momentum / PX_PER_M) + 'm/s';
         const s = HUD_SCALE * (1 + clamp((hero.momentum - MOMENTUM.max) / (MOMENTUM.overMax - MOMENTUM.max), 0, 1));
-        const cx = SPEED_VALUE_X + (str.length * HUD_SCALE * (CHARSET_SIZE + 1) - HUD_SCALE) / 2;
+        const cx = SPEED_VALUE_X + textWidth(str, HUD_SCALE) / 2;
         renderText(str, cx, SPEED_VALUE_Y - (s - HUD_SCALE) * CHARSET_SIZE / 2, ALIGN_CENTER, s);
       }
-      renderText('shaft: ' + Math.round(tunnel / PX_PER_M) + 'm', HUD_X, CHARSET_SIZE + HUD_LINE, ALIGN_LEFT, HUD_SCALE);
-      renderText('dust:', HUD_X, DUST_COUNTER_Y, ALIGN_LEFT, HUD_SCALE);
+      renderText('Shaft:    ' + Math.round(tunnel / PX_PER_M) + 'm', HUD_X, CHARSET_SIZE + HUD_LINE, ALIGN_LEFT, HUD_SCALE);
+      renderText('Dust:', HUD_X, DUST_COUNTER_Y, ALIGN_LEFT, HUD_SCALE);
       // the value briefly swells to 2x and back on each tally (see dustPop); grow about the number's own centre so it pops in place
       {
         const str = '' + dust;
         const s = HUD_SCALE * (1 + Math.sin(clamp((gameTime - dustPop) / DUST_POP_DURATION, 0, 1) * Math.PI));
-        const cx = DUST_COUNTER_X + (str.length * HUD_SCALE * (CHARSET_SIZE + 1) - HUD_SCALE) / 2;
+        const cx = DUST_COUNTER_X + textWidth(str, HUD_SCALE) / 2;
         renderText(str, cx, DUST_COUNTER_Y - (s - HUD_SCALE) * CHARSET_SIZE / 2, ALIGN_CENTER, s);
       }
       break;
@@ -1381,25 +1387,31 @@ function render() {
       if (!rewound) drawHero();
       // no win/lose split (the run just ends, see endGame()) - but a run that
       // bagged no dust grew no rainbow, so nudge the player to collect next
-      // time. Both headlines are <= 9 chars at HUD_SCALE+1 (the CAMERA_WIDTH
-      // fit constraint, see the RENDER_SCALE comment). outcome is still
-      // recorded for future share text.
-      renderText(dust ? 'well dug!' : 'dry run!', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 - 2 * HUD_LINE, ALIGN_CENTER, HUD_SCALE + 1);
-      // metric lines share a left edge (7-char label field), like the in-game
-      // HUD - centre-aligning each line drifts the labels as the values change
-      // width. mx roughly centres the block.
+      // time (the headline is the CAMERA_WIDTH fit constraint, see the
+      // RENDER_SCALE comment). outcome is still recorded for future share text.
+      renderText(rainbowX2 !== undefined ? 'Double rainbow!' : dust ? 'Well dug!' : 'Dry run!', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 - 2 * HUD_LINE, ALIGN_CENTER, HUD_SCALE + 1);
+      // metric lines: labels left-aligned at mx, values left-aligned at a
+      // shared edge one label-field in (a proportional font won't line up on a
+      // leading space, so label and value are drawn separately). mx roughly
+      // centres the block.
       {
-        const mx = CAMERA_WIDTH / 2 - 6 * HUD_ADVANCE;
-        renderText('shaft: ' + Math.round(tunnel / PX_PER_M) + 'm', mx, CAMERA_HEIGHT / 2 + HUD_LINE, ALIGN_LEFT, HUD_SCALE);
-        renderText(' dust: ' + dust, mx, CAMERA_HEIGHT / 2 + 2 * HUD_LINE, ALIGN_LEFT, HUD_SCALE);
-        renderText('score: ' + score, mx, CAMERA_HEIGHT / 2 + 3 * HUD_LINE, ALIGN_LEFT, HUD_SCALE);
+        const lw = Math.max(textWidth('Shaft:   ', HUD_SCALE), textWidth('Dust:   ', HUD_SCALE), textWidth('Score:   ', HUD_SCALE));
+        const mx = CAMERA_WIDTH / 2 - (lw + textWidth('99999m', HUD_SCALE)) / 2;
+        const line = (label, value, row) => {
+          const y = CAMERA_HEIGHT / 2 + row * HUD_LINE;
+          renderText(label, mx, y, ALIGN_LEFT, HUD_SCALE);
+          renderText('' + value, mx + lw, y, ALIGN_LEFT, HUD_SCALE);
+        };
+        line('Shaft:', Math.round(tunnel / PX_PER_M) + 'm', 1);
+        line('Dust:', dust, 2);
+        line('Score:', score, 3);
       }
-      if (endReady) renderText(isMobile ? 'tap to retry' : 'press any key', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + 5 * HUD_LINE, ALIGN_CENTER, HUD_SCALE);
+      if (endReady) renderText(isMobile ? 'Tap to play again' : 'Press any key to play again', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + 5 * HUD_LINE, ALIGN_CENTER, HUD_SCALE);
       // renderText(monetizationEarned(), TEXT.width - CHARSET_SIZE, TEXT.height - 2*CHARSET_SIZE, ALIGN_RIGHT);
       break;
   }
 
-  // audio mute indicator, top-right (no speaker glyph in the charset) - every
+  // audio mute indicator, top-right (no speaker glyph) - every
   // screen, mirrors the HUD's top-left lines
   if (muted) renderText('muted', CAMERA_WIDTH - CHARSET_SIZE, CHARSET_SIZE, ALIGN_RIGHT, HUD_SCALE);
 
@@ -1761,7 +1773,6 @@ onload = async (e) => {
   seatSpawn();   // seat the title backdrop on the frame startGame() will open on
   //checkMonetization();
 
-  await initCharset();
   tileset = await loadImg(TILESET);
   // speak = await initSpeech();
   renderMap();

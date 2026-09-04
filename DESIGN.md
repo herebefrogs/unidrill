@@ -63,9 +63,10 @@ so how deep you happen to be reads arbitrary. Both terms reward
 independently; `SCORE_PER_M` sits high enough that a wide sideways drill
 still scores, but dust is the denser reward. Resurfacing is not required to
 score; it just ends the run early with whatever momentum is left. A run that
-collected dust shows the neutral headline `well dug!`; a run that collected
-none shows `dry run!` — a nudge to collect, since it also grew no rainbow.
-No win/lose split either way. (This replaces the earlier bingo-fuel lose
+collected dust shows the neutral headline `Well dug!` (or `Double rainbow!`
+when the resurface earned the two-bow arch); a run that collected none shows
+`Dry run!` — a nudge to collect, since it also grew no rainbow. No win/lose
+split either way. (This replaces the earlier bingo-fuel lose
 condition — see TODO.md "Won't do: Bingo-fuel warning".)
 
 **Rainbow sprout.** On END_SCREEN a rainbow grows out of the tunnel mouth: a
@@ -183,8 +184,8 @@ dense patches decays on drag + entropy alone.
 
 ## Tracked state
 
-Speed, shaft length, dust collected (HUD labels `speed:` / `shaft:` /
-`dust:`). The HUD shows them top-left, left-aligned, at 3x the bitmap font.
+Speed, shaft length, dust collected (HUD labels `Speed:` / `Shaft:` /
+`Dust:`). The HUD shows them top-left, left-aligned, at 3x base text size.
 Speed and shaft length are converted from the pixel-space sim values to
 metric for display only (`PX_PER_M` = 32 px/m → `speed` in m/s, `shaft` in
 m, no decimal — the accumulator hits four digits routinely); the sim itself
@@ -198,9 +199,10 @@ while the surface is on screen — once deep there's no reference frame — so
 it's tuned for that: the drill is ~0.9 m, a dust cell ~0.25 m, a straight
 sand dive bottoms out around 48 m.
 
-The END screen repeats `shaft:` / `dust:` plus a `score:` line, left-aligned
-on a shared origin with the labels in a fixed-width field so the value
-column lines up.
+The END screen repeats `Shaft:` / `Dust:` plus a `Score:` line: labels
+left-aligned on a shared origin, values on a second shared origin one
+label-field in (measured off the widest label, since the proportional font
+won't line up on padding spaces alone), so the value column lines up.
 
 ## Controls
 
@@ -255,6 +257,17 @@ dense-patch entry were prototyped and dropped — hit-stop, a few frozen
 frames, and a "spool-up", a visible slowdown then catch-up: both read as
 jank, not juice. The dense-boost surge now carries that beat instead, see
 Run end / score.)
+
+**Text.** All on-screen text is the **Impact** system font (with a condensed
+fallback stack), white with a black round-joined `strokeText` casing under
+the fill so it stays legible over any background — no backing rect. Costs no
+bytes and no asset load. `text.js` renders it into an offscreen buffer that
+composites over the frame; `renderText(msg, x, y, align, scale)` sizes the
+glyph box to `scale · CHARSET_SIZE · FILL` px of cap height with the cap top
+anchored at `y` (so `FILL`, the one apparent-size knob, can be tuned without
+shifting any line stack). Case is the caller's choice — `12m` (metres) must
+not read as `12M` (millions). The old pixel-art charset sprite and its
+lowercase-only, limited repertoire are gone.
 
 **Viewport.** One fixed knob, `RENDER_SCALE` (screen px per world px), sets
 how big everything renders — dust cell, HUD glyph, drill — and it is the
@@ -342,7 +355,7 @@ that ends (stall-out or resurfacing) while particles are still mid-flight
 must tally their dust instantly rather than let the score depend on how
 much of the animation had time to finish; those particles keep flying
 visually after the tally, they just don't double-count on arrival. On each
-tick the counter *value* (the number only, not the `dust:` label) briefly
+tick the counter *value* (the number only, not the `Dust:` label) briefly
 swells to 2x and back (`DUST_POP_DURATION`), scaling about its own centre;
 re-triggers aren't debounced, so a dense-patch burst reads as a rapid
 pulse.
@@ -361,10 +374,10 @@ separation for parallax.
 ## Screens
 
 Boot flow is `LOAD → TITLE → GAME → REWIND → END`, then `END → GAME` on retry
-(no return to the title). `LOAD` is a black screen with a single "press any
-key" line — it exists only to catch the first input gesture, which is what
-unlocks the Web Audio context (browsers block autoplay until then). `TITLE`
-shows the game name and a start prompt. Both are click-through gates:
+(no return to the title). `LOAD` is a black screen with a `Loading complete` /
+`Press any key` line — it exists only to catch the first input gesture, which
+is what unlocks the Web Audio context (browsers block autoplay until then).
+`TITLE` shows the game name and a `Press any key to start` prompt. Both are click-through gates:
 `bootGatePassed()` snapshots the keys held when a gate is passed so a key still
 down doesn't fall straight through the next screen (the pointer path
 self-consumes and needs no guard). The `END` retry has its own equivalent gate

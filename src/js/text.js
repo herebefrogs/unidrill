@@ -1,44 +1,48 @@
-import { lerp, loadImg } from './utils';
-
-// available alphabet (must match characters in the alphabet sprite exactly)
-// U = up arrow
-// D = down arrow
-// L = left arrow
-// R = right arrow
-// T = teapot icon
-export const ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789.:!-%,/';
+// White system-font (Impact) text, rendered straight to an offscreen buffer
+// that game.js blits over the frame. Replaces the old pixel-art charset sprite;
+// the box semantics are kept identical so game.js's layout math is untouched:
+// a glyph "box" is `scale * CHARSET_SIZE * FILL` px tall (cap height) with its
+// top anchored at the `y` passed in.
 
 export const ALIGN_LEFT = 0;
 export const ALIGN_CENTER = 1;
 export const ALIGN_RIGHT = 2;
+const ALIGN = ['left', 'center', 'right'];
 
-// alphabet sprite, embedded as a base64 encoded dataurl by build script
-import CHARSET from '../img/charset.webp';
-export const CHARSET_SIZE = 8; // in px
-const TEXT_SPEED = 500;        // milliseconds per character
-let charset;
+// layout unit game.js builds its HUD line stack, alignment offsets and particle
+// targets from. Was the bitmap cell size (px); kept at 8 so none of that math
+// moves when the font changes.
+export const CHARSET_SIZE = 8;
+
+// Case is the caller's choice now (the bitmap charset was single-case; a system
+// font isn't, and e.g. "12m" for metres must not read as "12M" millions). Full
+// character set too - no more charset-sprite repertoire limit.
+
+const FONT = 'Impact, "Haettenschweiler", "Franklin Gothic Bold", "Arial Narrow", sans-serif';
+// Impact's cap-height ink box as a multiple of the old 8px cell - the single
+// knob for apparent text size. Anchoring ink-top at `y` means changing FILL
+// does NOT shift the HUD line stack, so it can be tuned in isolation.
+const FILL = 1;
+
 let textCanvas;
 let ctx;
+let capH = 0.7;   // cap height, as an em fraction (measured from Impact)
 
-/**
- * Load charset spritesheet and initialize the text canvas at the specified size
- * @param {Canvas} canvas main canvas to clone
- * @param {int} w
- * @param {int} h
- * @return the text canvas so it can be blipped
- */
-export const initCharset = async () => {
-  charset = await loadImg(CHARSET);
-}
+// measure Impact's cap height once (system font - synchronously available, no
+// font-load race) so renderText can size the box in px and place the baseline.
+const calibrate = () => {
+  ctx.font = `100px ${FONT}`;
+  ctx.textBaseline = 'alphabetic';
+  const m = ctx.measureText('HAMBURGX0369');
+  capH = m.actualBoundingBoxAscent / 100;
+};
 
 export const initTextBuffer = (canvas, w, h) => {
   textCanvas = canvas.cloneNode();
   textCanvas.width = w;
   textCanvas.height = h;
-
   ctx = textCanvas.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
-
+  calibrate();
   return textCanvas;
 }
 
@@ -47,32 +51,32 @@ export const clearTextBuffer = () => {
 }
 
 /**
- * Render a message on the canvas context using a pixelart alphabet sprite
- * @param {*} msg 
- * @param {*} x 
- * @param {*} y 
- * @param {*} align 
- * @param {*} scale 
+ * Render a white message in Impact, sized so its cap height spans
+ * `scale * CHARSET_SIZE * FILL` px with the cap top anchored at `y`. A black
+ * casing (round-joined `strokeText` under the fill - no backing rect, hugs the
+ * glyphs) keeps it legible on any background.
+ * @param {string} msg
+ * @param {number} x
+ * @param {number} y      cap-top of the text box
+ * @param {number} align  ALIGN_LEFT | ALIGN_CENTER | ALIGN_RIGHT
+ * @param {number} scale  box-height multiplier (may be fractional - pop anims)
  */
 export function renderText(msg, x, y, align = ALIGN_LEFT, scale = 1) {
-  const SCALED_SIZE = scale * CHARSET_SIZE;
-  const MSG_WIDTH = msg.length * SCALED_SIZE + (msg.length - 1) * scale;
-  const ALIGN_OFFSET = align === ALIGN_RIGHT ? MSG_WIDTH :
-                       align === ALIGN_CENTER ? MSG_WIDTH / 2 :
-                       0;
-  [...msg].forEach((c, i) => {
-    ctx.drawImage(
-      charset,
-      // TODO could memoize the characters index or hardcode a lookup table
-      ALPHABET.indexOf(c) * CHARSET_SIZE, 0, CHARSET_SIZE, CHARSET_SIZE,
-      x + i * scale * (CHARSET_SIZE + 1) - ALIGN_OFFSET, y, SCALED_SIZE, SCALED_SIZE
-    );
-  });
-};
+  const box = scale * CHARSET_SIZE * FILL;
+  msg = '' + msg;
+  ctx.font = `${box / capH}px ${FONT}`;
+  ctx.textAlign = ALIGN[align];
+  ctx.textBaseline = 'alphabetic';
+  ctx.lineJoin = ctx.lineCap = 'round';
+  ctx.lineWidth = box / 3;                 // outset ~box/6 of black around the ink
+  ctx.strokeStyle = '#000';
+  ctx.strokeText(msg, x, y + box);
+  ctx.fillStyle = '#fff';
+  ctx.fillText(msg, x, y + box);
+}
 
-export function renderAnimatedText(msg, x, y, startTime, currentTime, align = ALIGN_LEFT, scale = 1) {
-  return renderText(
-    msg.substring(0, Math.floor(lerp(0, msg.length, (currentTime - startTime) / TEXT_SPEED))),
-    x, y, align, scale
-  );
-};
+/** Rendered width of `msg` at `scale`, for laying out split label/value pairs. */
+export function textWidth(msg, scale = 1) {
+  ctx.font = `${scale * CHARSET_SIZE * FILL / capH}px ${FONT}`;
+  return ctx.measureText('' + msg).width;
+}

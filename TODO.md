@@ -128,11 +128,6 @@ as they land — this list stays scoped to open work.
 - [ ] Add gamepad support. There's prior art in Jerome's old veggie-ninja repo:
       https://github.com/herebefrogs/veggie-ninja/blob/master/src/js/gamepad.js
       (and possibly an older commit in gamejam-boilerplate's own history).
-- [ ] Drop the bitmap font, switch to Impact. Sharper and more readable than
-      the pixel font, and it's a system font so it costs no bytes. Would
-      retire src/js/text.js (`renderText`/charset sprite/`CHARSET_SIZE`/
-      `ALIGN_*`) in favour of plain canvas `fillText` — touches every HUD
-      + screen-text call site and the `scale`/`HUD_*` layout math.
 - [ ] Add ROCK as a third material. Solid and undrillable — the drill can't
       carve it. On contact it deflects the player's heading (bounce) rather
       than stopping them dead. See DESIGN.md (materials, and the rock

@@ -320,3 +320,23 @@ Roughly in build order, oldest first.
       pointer path needs no guard: `isPointerUp()` already consumes the press.
       Screen constants renumbered `LOAD=0 … END=4` (all comparisons are `===`,
       no ordinal math).
+
+- [x] Drop the bitmap font, switch to Impact. The pixel-art charset sprite
+      (`src/img/charset.*`) and `initCharset` / `renderAnimatedText` / the
+      `ALPHABET` lookup are gone; `text.js` now renders **Impact** (condensed
+      fallback stack) via canvas `strokeText` + `fillText` — white fill over a
+      black round-joined casing for legibility on any background, no backing
+      rect. `renderText(msg, x, y, align, scale)` keeps its signature: it
+      measures Impact's cap height once at buffer init, then sizes the glyph
+      box to `scale · CHARSET_SIZE · FILL` px of cap height with the cap top
+      anchored at `y`, so `FILL` (the sole apparent-size knob) tunes without
+      shifting any line stack. `CHARSET_SIZE` (still 8) stays the layout unit
+      so `game.js`'s HUD math was untouched; the monospace-advance assumptions
+      that *were* baked in (`HUD_ADVANCE`, `7·advance` value columns, the END
+      block's leading-space alignment) were replaced with a new `textWidth()`
+      export. Case is now the caller's call (`12m` metres ≠ `12M` millions).
+      Rode along: screen copy repunctuated and title-cased (`Loading complete`
+      / `Press any key`, `UniDrill Corp`, `Speed:` / `Shaft:` / `Dust:`,
+      `Well dug!` / `Dry run!` / `Double rainbow!`, `Press any key to play
+      again`) and resized (LOAD + title prompt 3x, `UniDrill Corp` 2x). Blocks
+      title/end-screen polish that was waiting on a real font.
