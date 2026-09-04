@@ -8,7 +8,7 @@ import { initSpeech } from './speech';
 import SONG_GAME from './song-game';
 import { save, load } from './storage';
 import { ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, CHARSET_SIZE, renderText, renderBubble, textWidth, initTextBuffer, clearTextBuffer } from './text';
-import { clamp, getRandSeed, setRandSeed, loadImg, lerp } from './utils';
+import { clamp, setRandSeed, loadImg, lerp } from './utils';
 import { CELL_SIZE, CLAY, sampleMaterial, materialColor, MATERIAL_DRAG, sampleDust, DUST_NONE, DUST_DENSE, setMapSeed } from './terrain';
 import TILESET from '../img/tileset.webp';
 
@@ -352,8 +352,18 @@ const PARTICLE_GROW_DURATION = 0.25;    // seconds, stage 0: growing in place
 const PARTICLE_FLY_DURATION = 0.6;      // seconds, stage 1: flight to the counter
 const PARTICLE_DURATION_JITTER = 0.2;   // +/- range, staggers arrivals on a multi-cell dig
 const PX_PER_M = 32;                                  // display-only: game logic is all px, the HUD converts to metres (tunnel length) and m/s (speed)
-const SCORE_PER_DUST = 10;                            // points per dust cell (see endGame(): score = SCORE_PER_DUST*dust + SCORE_PER_M*metres carved - both terms reward independently)
+const SCORE_PER_DUST = 10;                            // points per dust cell (see computeScore(): score = SCORE_PER_DUST*dust + SCORE_PER_M*metres carved - both terms reward independently)
 const SCORE_PER_M = 2;                                // points per metre of virgin shaft carved
+
+// score formula, shared by the just-finished run (endGame) and every stored
+// highscore row (highscoreRows) - storage keeps the raw dust+shaft numbers,
+// never a baked score (see endGame), so a future SCORE_PER_DUST/SCORE_PER_M
+// retune - or an all-new formula - instantly re-scores every stored row
+// instead of leaving old entries stuck on whatever formula was live when
+// they were set.
+function computeScore(dust, shaft) {
+  return SCORE_PER_DUST * dust + SCORE_PER_M * shaft;
+}
 const TRAIL_STEP = 4 * CELL_SIZE;                     // min drill travel between recorded breadcrumbs (see `trail`) - coarse is fine, the rewind camera lerps between points at speed
 const REWIND_DURATION = 1.1;                          // seconds the end-of-run camera rewind aims to take, whatever the path length (speed is derived, then clamped)
 // END_SCREEN rainbow: a full semicircle with its left foot on the tunnel
@@ -702,19 +712,24 @@ function titleMenuItems() {
   ];
 }
 
-// reroll a fresh random terrain+dust pair (no typing required - see the
-// title-menu item above) and re-seat + repaint the title backdrop on it, same
-// as onload's boot sequence (seatSpawn + renderMap), so the dust patches /
-// resting unicorn shown always match the new terrain instead of a jarring
-// jump-cut the moment GAME_SCREEN starts. getRandSeed(true) ignores the URL
-// and returns 6 random base64 chars (boilerplate helper in utils.js),
-// uppercased for readability (costs some of base64's variety, worth it);
-// called twice for independent terrain/dust halves, off Math.random - not
-// hash2D, not the (unused) utils.js prng stream, matching how the rest of the
-// game's cosmetic randomness (e.g. particle jitter) already draws straight
-// from Math.random.
+// fresh random 8-char uppercase seed (A-Z only, keeps the highscore table's
+// Seed column narrow on mobile - see highscoreLayout) - straight off
+// Math.random, not hash2D, not the (unused) utils.js prng stream, matching
+// how the rest of the game's cosmetic randomness (e.g. particle jitter)
+// already draws.
+function randomSeed(len = 8) {
+  let s = '';
+  for (let i = 0; i < len; i++) s += String.fromCharCode(65 + Math.floor(Math.random() * 26));
+  return s;
+}
+
+// reroll a fresh random seed (no typing required - see the title-menu item
+// above) and re-seat + repaint the title backdrop on it, same as onload's
+// boot sequence (seatSpawn + renderMap), so the dust patches / resting
+// unicorn shown always match the new terrain instead of a jarring jump-cut
+// the moment GAME_SCREEN starts.
 function rerollSeed() {
-  applySeed(getRandSeed(true).toUpperCase(), getRandSeed(true).toUpperCase());
+  applySeed(randomSeed());
   seatSpawn();
   renderMap();
 }
@@ -813,12 +828,12 @@ const HS_ROW = HS_SCALE * CHARSET_SIZE + 10;
 const HS_COL_GAP = CHARSET_SIZE * 2;
 const HS_HEADERS = ['Seed', 'Score', 'Date'];
 
-// highscores are keyed by seed ("terrain-dust", see runSeed/endGame) -
-// flatten to rows and rank by score, best first.
+// highscores are keyed by seed (runSeed, see endGame) - flatten to rows and
+// rank by score, best first.
 function highscoreRows() {
   const table = load('highscores') || {};
   return Object.keys(table)
-    .map(seed => ({ seed, score: table[seed].score, date: table[seed].date }))
+    .map(seed => ({ seed, score: computeScore(table[seed].dust, table[seed].shaft), date: table[seed].date }))
     .sort((a, b) => b.score - a.score);
 }
 
@@ -859,11 +874,11 @@ function highscoreLayout() {
 // re-seats + repaints the backdrop same as rerollSeed, so the unicorn/dust
 // shown already match what Start is about to drill into.
 function selectSeed(seed) {
-  const [terrainStr, dustStr] = seed.split('-');
-  applySeed(terrainStr, dustStr);
+  applySeed(seed);
   seatSpawn();
   renderMap();
   screen = TITLE_SCREEN;
+  titleIndex = 0;   // chevron back on Start - picking a seed is almost always followed by starting the run, shouldn't cost an extra Up
 }
 
 // HIGHSCORE_SCREEN row action: the appended Back row (see highscoreLayout)
@@ -1223,23 +1238,31 @@ function endGame(resurfaced) {
   // They're left in `particles` (marked counted) so they still finish
   // flying visually on END_SCREEN.
   for (const p of particles) if (!p.counted) { dust++; p.counted = true; }
-  // score: both terms reward independently (see SCORE_PER_DUST). Computed here,
+  // score: both terms reward independently (see computeScore). Computed here,
   // after the early tally, so it doesn't depend on how many particles had
-  // landed. tunnel is px; the metre count is the second term.
-  score = SCORE_PER_DUST * dust + SCORE_PER_M * Math.round(tunnel / PX_PER_M);
+  // landed. shaft is metres (matches the HUD "Shaft: Xm" line and storage
+  // below - see computeScore).
+  const shaft = Math.round(tunnel / PX_PER_M);
+  score = computeScore(dust, shaft);
 
-  // per-seed highscore, keyed by the same "terrain-dust" string as the
-  // shareable URL (runSeed, set in seedMap()) - only touches storage when
-  // this run actually beats what's on record for this seed.
+  // per-seed highscore, keyed by the same seed string as the shareable URL
+  // (runSeed, set in seedMap()) - only touches storage when this run
+  // actually beats what's on record for this seed. Stores the raw dust+shaft
+  // numbers, not the baked score (see computeScore), so a formula retune
+  // re-scores every stored row instead of leaving it stuck on the old one.
   const highscores = load('highscores') || {};
   const best = highscores[runSeed];
-  if (!best || score > best.score) {
-    highscores[runSeed] = { date: new Date().toISOString().slice(0, 10), score };
-    // cap the table at HIGHSCORE_MAX entries, evicting the lowest score(s)
-    // first - keeps storage and the HIGHSCORE_SCREEN table bounded without a
-    // scroll/paging UI.
-    const bySeed = Object.keys(highscores).sort((a, b) => highscores[b].score - highscores[a].score);
-    bySeed.slice(HIGHSCORE_MAX).forEach(seed => delete highscores[seed]);
+  if (!best || score > computeScore(best.dust, best.shaft)) {
+    highscores[runSeed] = { date: new Date().toISOString().slice(0, 10), dust, shaft };
+    // cap the table at HIGHSCORE_MAX entries total, evicting the lowest
+    // non-preset score(s) first - keeps storage and the HIGHSCORE_SCREEN
+    // table bounded without a scroll/paging UI. The PRESET_SEEDS (see
+    // onload) are exempt from eviction - they stay pickable from
+    // HIGHSCORE_SCREEN's seed picker even if never dug into - so only
+    // HIGHSCORE_MAX - PRESET_SEEDS.length slots are up for grabs among
+    // everything else, keeping the on-screen row count the same as before.
+    const bySeed = Object.keys(highscores).sort((a, b) => computeScore(highscores[b].dust, highscores[b].shaft) - computeScore(highscores[a].dust, highscores[a].shaft));
+    bySeed.filter(seed => !PRESET_SEEDS.includes(seed)).slice(HIGHSCORE_MAX - PRESET_SEEDS.length).forEach(seed => delete highscores[seed]);
     save('highscores', highscores);
   }
 
@@ -2134,22 +2157,26 @@ function toggleLoop(value) {
 // EVENT HANDLERS
 
 // Resolve the run seed and hand it to the terrain generator. One URL param
-// carries both halves as "terrain-dust". No param -> the themed default
-// (UNICORNS / RAINBOWS). A non-empty param is parsed and any missing half
-// filled with SEED_FALLBACK, so a partial "?seed=FOO" still overrides the
-// default. terrain and dust vary independently while a run stays a single
-// shareable string.
-const SEED_DEFAULT = ['UNICORNS', 'RAINBOWS'];
-const SEED_FALLBACK = 'JS13K2026';
-let runSeed;   // resolved "terrain-dust" string for this run - the highscore table key (see endGame) and the TITLE_SCREEN seed label
+// carries the whole seed as a single string - no param -> the themed default
+// (the game's own JS13K2026 entry string). setMapSeed() (terrain.js) folds it
+// into a tiny local RNG and draws the terrain/dust uint32 seeds off its first
+// two outputs, so one player-facing string is enough to vary both fields
+// independently while a run stays a single short shareable/typeable string.
+const SEED_DEFAULT = 'JS13K2026';
+// three fixed "themed" seeds always offered from HIGHSCORE_SCREEN's seed
+// picker (see onload's localStorage bootstrap and endGame's eviction guard),
+// keeping the UNICORNS/RAINBOWS joke reachable even after New seed rerolls
+// the active one away from it.
+const PRESET_SEEDS = ['JS13K2026', 'UNICORNS', 'RAINBOWS'];
+let runSeed;   // resolved seed string for this run - the highscore table key (see endGame) and the TITLE_SCREEN seed label
 
-// fold a terrain/dust pair into the map generator, record it as runSeed, and
-// reflect it in the URL so the run is shareable (guarded: some embed
-// sandboxes, e.g. js13kgames' iframe, block history writes - which is also
-// why runSeed gets its own on-screen label, see TITLE_SCREEN's render() case).
-function applySeed(terrainStr, dustStr) {
-  setMapSeed(terrainStr, dustStr);
-  runSeed = `${terrainStr}-${dustStr}`;
+// hand the seed to the map generator, record it as runSeed, and reflect it in
+// the URL so the run is shareable (guarded: some embed sandboxes, e.g.
+// js13kgames' iframe, block history writes - which is also why runSeed gets
+// its own on-screen label, see TITLE_SCREEN's render() case).
+function applySeed(seed) {
+  setMapSeed(seed);
+  runSeed = seed;
   try {
     const url = new URL(location);
     url.searchParams.set('seed', runSeed);
@@ -2159,22 +2186,49 @@ function applySeed(terrainStr, dustStr) {
 
 function seedMap() {
   const raw = new URLSearchParams(location.search).get('seed');
-  let [terrainStr, dustStr] = SEED_DEFAULT;
-  if (raw) {
-    // uppercase before splitting - matches the all-caps look of the default/
-    // fallback/rerolled seeds (see rerollSeed), so a hand-typed or
-    // lower/mixed-case shared URL still reads the same on the seed label.
-    const [t, d] = raw.toUpperCase().split('-');
-    terrainStr = t || SEED_FALLBACK;
-    dustStr = d || SEED_FALLBACK;
+  // uppercase - matches the all-caps look of the default/rerolled seeds (see
+  // randomSeed), so a hand-typed or lower/mixed-case shared URL still reads
+  // the same on the seed label.
+  applySeed(raw ? raw.toUpperCase() : SEED_DEFAULT);
+}
+
+// seed the highscore table with the three PRESET_SEEDS the first time the
+// game ever loads (never overwrites a seed a player has actually scored on -
+// only fills in whichever of the three are still missing), so
+// HIGHSCORE_SCREEN's seed picker always offers them even before anyone has
+// dug into them. dust/shaft 0 (not undefined) so computeScore() on them is 0
+// - they sort last, display as "0" rather than "undefined", and endGame()'s
+// "beats the record" check still lets a real run overwrite them normally -
+// only the eviction pass treats them specially (see endGame).
+function initPresetSeeds() {
+  const highscores = load('highscores') || {};
+  let changed = false;
+  // one-time migration, dropping any row in either stale shape - nothing has
+  // shipped on the old formats yet, so deleting is safe (a baked score can't
+  // be decomposed back into dust+shaft anyway):
+  // - keyed "TERRAIN-DUST" (the old two-string seed format) - selectSeed()
+  //   would now fold that whole hyphenated key as a single seed, loading a
+  //   map unrelated to the score attached to it, and the un-shortened key
+  //   defeats the point of this change on the HIGHSCORE_SCREEN table (still
+  //   13-17 chars wide).
+  // - { date, score } (the old baked-score shape, pre-computeScore) - has no
+  //   dust/shaft, so computeScore() on it is NaN: it'd render "NaN" in the
+  //   Score column and, worse, endGame()'s `score > computeScore(...)` check
+  //   is always false against NaN, permanently locking that seed's record.
+  for (const seed of Object.keys(highscores)) {
+    if (seed.includes('-') || highscores[seed].dust === undefined) { delete highscores[seed]; changed = true; }
   }
-  applySeed(terrainStr, dustStr);
+  for (const seed of PRESET_SEEDS) {
+    if (!highscores[seed]) { highscores[seed] = { dust: 0, shaft: 0, date: '' }; changed = true; }
+  }
+  if (changed) save('highscores', highscores);
 }
 
 // the real "main" of the game
 onload = async (e) => {
   document.title = 'Errands of Iris';
 
+  initPresetSeeds();
   seedMap();
   onresize();
   seatSpawn();   // seat the title backdrop on the frame startGame() will open on

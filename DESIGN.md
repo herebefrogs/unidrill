@@ -407,10 +407,10 @@ that's guaranteed to happen (see Music & sound).
 
 `TITLE` shows "Errands of Iris", Iris's speech bubble (see Premise) over the
 dust-patched backdrop, the resting unicorn (offset left of its real spawn
-point — see below), a small `Seed: TERRAIN-DUST` corner label (js13kgames
-runs entries in an iframe, hiding the URL bar and the seed with it), and a
-menu: **Start**, **Music: N%**, **Highscores**, **New seed**. Up/Down move
-the selection (a `>` chevron in its own column so labels never shift), Enter
+point — see below), a small `Seed: XXXXXXXX` corner label (js13kgames runs
+entries in an iframe, hiding the URL bar and the seed with it), and a menu:
+**Start**, **Music: N%**, **Highscores**, **New seed**. Up/Down move the
+selection (a `>` chevron in its own column so labels never shift), Enter
 triggers it; each row also has a tap-friendly hit box for mobile. Selecting
 Start hops the resting unicorn along a semicircular arc into its real
 game-start pose (`titleJumpT`/`titleJumpPose`, eased) before handing off to
@@ -423,9 +423,10 @@ is appended as one more row below the table (`highscoreLayout()` treats it as
 just another entry, a blank row's gap under the last score), so Up/Down wrap
 through it the same as any chevron menu — Down off the last score lands on
 it, Down again wraps to the first score. Enter/Space or a tap on a score row
-loads that seed and drops back to `TITLE` on it (so Start still plays the
-jump-in); the same on the Back row just returns to `TITLE`. Esc is a shortcut
-straight to `TITLE` from here too (see Controls).
+loads that seed and drops back to `TITLE` on it, chevron reset to **Start**
+(picking a seed is almost always followed by starting the run, so Start is
+one press away instead of two); the same on the Back row just returns to
+`TITLE`. Esc is a shortcut straight to `TITLE` from here too (see Controls).
 
 ## Music & sound
 
@@ -466,26 +467,32 @@ The underground has its own dedicated seed, separate from every other use of
 randomness in the game — it must not draw from the shared `utils.js` PRNG;
 anything else needing randomness gets its own generator.
 
-The seed is **two strings**, folded to uint32 constants and mixed into
-`hash2D`: one shapes the terrain (macro sections + rock blobs), one the dust
-field, so they can be rerolled independently. They ride one URL param,
-`?seed=terrain-dust`:
+The seed is **one player-facing string**, riding a single URL param
+(`?seed=XXXXXXXX`) — narrow enough to keep the `HIGHSCORE_SCREEN` table
+(below) from clipping on mobile. `setMapSeed()` folds it (xfnv1a hash + a
+small LCG, self-contained in `terrain.js`) and draws its first two outputs as
+the terrain and dust uint32 constants mixed into `hash2D`, so one string is
+enough to vary both fields independently:
 
-| `?seed=` | terrain / dust |
+| `?seed=` | resolves to |
 |---|---|
-| *(absent)* | `UNICORNS` / `RAINBOWS` — the themed default |
-| `A-B` | `A` / `B` |
-| `A` or `A-` | `A` / `JS13K2026` |
-| `-B` | `JS13K2026` / `B` |
+| *(absent)* | `JS13K2026` — the themed default |
+| `xyz` | `XYZ` (uppercased) |
 
-`seedMap()` resolves this, calls `setMapSeed()`, and writes the resolved pair
-back to the URL so any run is a shareable link. (Seed 0 — unreachable through
-`seedMap` — reproduces the original unseeded map.)
+`seedMap()` resolves this, calls `applySeed()` → `setMapSeed()`, and writes
+the resolved string back to the URL so any run is a shareable link. (Seed 0 —
+unreachable through `seedMap` — reproduces the original unseeded map.)
 
-The title menu's **New seed** item rerolls a fresh random terrain/dust pair
-(`getRandSeed(true)`, uppercased for readability) with no typing required,
-re-seating and repainting the underground on it immediately so the title
-backdrop never shows stale terrain.
+The title menu's **New seed** item rerolls a fresh random 8-char uppercase
+seed (`randomSeed()`, A–Z, straight off `Math.random`) with no typing
+required, re-seating and repainting the underground on it immediately so the
+title backdrop never shows stale terrain.
+
+Three fixed **preset seeds** — `JS13K2026`, `UNICORNS`, `RAINBOWS` (keeping
+the theme joke reachable) — are bootstrapped into the highscore table on
+first load if missing, so they're always offered from `HIGHSCORE_SCREEN`'s
+seed picker even before anyone has played them, and are exempt from the
+table's eviction cap (see Highscores below).
 
 **Sharing.** END_SCREEN's **Share your score** menu item (`shareScore()`)
 hands `share.js` a payload built from the run just finished: title, a text
@@ -500,13 +507,18 @@ to a Twitter-intent URL (text + url only, no image) when native sharing
 isn't available.
 
 **Highscores.** A per-seed table under the `2026.errands-of-iris.highscores`
-storage key (`storage.js`, JSON-serialised), each entry `{ score, date }`
-keyed by its `terrain-dust` seed string. `endGame()` writes a new entry only
-when it beats what's on record for that seed, then caps the table at 10 by
-evicting the lowest score(s) — a top-10 leaderboard, not a full history, so
-no scroll/paging UI is needed. The title menu's **Highscores** item opens
-`HIGHSCORE_SCREEN` (see Screens), which lists `Seed | Score | Date` sorted by
-score and doubles as the seed picker described above.
+storage key (`storage.js`, JSON-serialised), each entry `{ dust, shaft, date }`
+keyed by its seed string — the raw run numbers, not a baked score, so a
+future scoring-formula retune (`computeScore()`) re-scores every stored row
+instead of leaving old entries stuck on whatever formula was live when they
+were set. `endGame()` writes a new entry only when it beats what's on record
+for that seed (compared via `computeScore()`), then caps the table at 10
+entries by evicting the lowest-scoring non-preset seed(s) first — the three
+preset seeds (above) are exempt from eviction, so the cap really bounds the
+other `10 - 3` slots. Top-10, not a full history, so no scroll/paging UI is
+needed. The title menu's **Highscores** item opens `HIGHSCORE_SCREEN` (see
+Screens), which lists `Seed | Score | Date` sorted by score (computed on
+read) and doubles as the seed picker described above.
 
 **Deterministic spawn.** The drill starts buffer-centred (so the camera seats
 on it at any viewport size) with `mapOffsetX` carrying its world position. A
@@ -561,9 +573,10 @@ off `hash2D`, a *stateless* deterministic hash of an integer coordinate
 pair returning a value in `[0, 1)` — output depends only on the coords, so
 call order and count never matter (this is why terrain and dust can share
 it freely, and why transient randomness must **not** — it belongs in
-`utils.js`'s stateful PRNG). The run's two seeds (terrain, dust) are folded
-into `hash2D` — as fixed-at-boot constants, so it stays a pure function of
-`(x,y)` within a run (see Replayability). Two passes:
+`utils.js`'s stateful PRNG). The run's two seeds (terrain, dust — both derived
+from the one player-facing seed string, see Replayability) are folded into
+`hash2D` — as fixed-at-boot constants, so it stays a pure function of `(x,y)`
+within a run. Two passes:
 
 **Macro pattern pass.** The world is cut into large square sections
 (`SECTION_SIZE`, currently 480px). Each section deterministically rolls one

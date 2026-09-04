@@ -13,8 +13,8 @@ const MATERIAL_COLOR = ['#e0c088', '#96633c'];
 export const MATERIAL_DRAG = [90, 300];
 
 // ---- run seed --------------------------------------------------------
-// Two seed strings, each folded to a uint32 constant mixed into hash2D:
-// one shapes the terrain (macro sections + rock blobs), one the dust
+// One player-facing seed string folds into two uint32 constants mixed into
+// hash2D: one shapes the terrain (macro sections + rock blobs), one the dust
 // field. setMapSeed() is called once at boot from the URL seed (game.js);
 // the values never change during a run, so hash2D stays a pure function of
 // (x, y) within a run — order-independent, safe to re-sample on repaint.
@@ -22,16 +22,25 @@ export const MATERIAL_DRAG = [90, 300];
 let terrainSeed = 0;
 let dustSeed = 0;
 
-// xfnv1a fold of a string to a uint32 (same construction as utils' seedRand)
-const foldSeed = str => {
+// Fold the seed string to a uint32 LCG state — xfnv1a hash + the avalanche
+// mix from utils.js's seedRand, duplicated (not imported) so terrain.js stays
+// a self-contained pure module — then draw its first two outputs as the
+// terrain/dust seeds. One seed is deterministic enough to key both
+// independently varying fields, since hash2D remixes per-cell on top of
+// this anyway.
+export const setMapSeed = str => {
   let h = 2166136261 >>> 0;
   for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
-  return h >>> 0;
-};
-
-export const setMapSeed = (terrainStr, dustStr) => {
-  terrainSeed = foldSeed(terrainStr);
-  dustSeed = foldSeed(dustStr);
+  h += h << 13; h ^= h >>> 7;
+  h += h << 3;  h ^= h >>> 17;
+  let s = (h += h << 5) >>> 0;
+  // full uint32 LCG state each step (not utils.js seedRand's 31-bit float
+  // output - that halves to an even int on the *2**32 rescale this needs,
+  // wasting the low bit).
+  const next = () => (s = Math.imul(48271, s)) >>> 0;
+  next();   // discard the first LCG output, same as utils.js's seedRand
+  terrainSeed = next();
+  dustSeed = next();
 };
 
 // deterministic 2D hash keyed on (x, y, seed), returns a value in [0, 1).
