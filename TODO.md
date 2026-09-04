@@ -5,10 +5,14 @@ for the reasoning behind each of these; this is just the sequencing.
 Completed items are moved to `CHANGELOG.md` (an archive, not read on startup)
 as they land — this list stays scoped to open work.
 
-- [ ] Music and sound effects. SFX for: collecting a dust cell, the dust
-      counter tally-tick, stalling out (momentum hits 0), and sprouting the
-      end-run rainbow. Plus background music. Helpers in src/js/sound.js
-      (and src/js/speech.js) are stubbed — wire them in.
+- [ ] Sound effects. SFX for: collecting a dust cell, the dust counter
+      tally-tick, stalling out (momentum hits 0), and sprouting the end-run
+      rainbow. `playSound` (ZzFX) in src/js/sound.js is wired; src/js/speech.js
+      is still stubbed. Background music is done (voxby/SoundBox — see
+      CHANGELOG). Open follow-up: momentum-linked pitch/filter on the game
+      track (staged de-risk plan — static loop first, confirmed good; couple to
+      `hero.momentum` next, then evaluate). Layered stems were considered and
+      dropped (one intensity, not worth the bytes).
 - [ ] Player sprite. Replace the blue cube with a stylized unicorn drawn at
       runtime with canvas primitives (rects + paths), not a bitmap sprite:
       square head, triangle horn/drill, rectangle body + tail, slim
@@ -65,6 +69,17 @@ as they land — this list stays scoped to open work.
 
 ## Later / revisit
 
+- [ ] Byte-golf pass (near submission, once features are frozen). Mechanical
+      only — see the "no premature byte-golfing" memory. Known dead weight to
+      clear:
+      - `src/js/sound.js` still carries ZzFXM (`zzfxM`, `loadSongs`, `playSong`)
+        and the game.js imports `loadSongs, playSong` — unused since music moved
+        to voxby/`player.js`. Drop them unless the SFX work (dust collect, tally
+        tick, stall, rainbow) ends up wanting a ZzFXM cue. `playSound` (single
+        `zzfx`) stays regardless.
+      - the debug overlays below.
+      - whatever else esbuild-metafile / a bundle diff flags at the time.
+
 - [ ] Delete the debug overlays — the `DEBUG_CAMERA` flag + ring/crosshair
       block and the `DEBUG_POINTER` flag + its branch of the D-pad draw block,
       both at the end of `render()` in game.js. **Only if we're over the 13 KB
@@ -78,9 +93,11 @@ as they land — this list stays scoped to open work.
       Iris is the Greek goddess of the rainbow and messenger of the gods,
       who travels *along* the rainbow — but nobody in-game needs to know
       that; the framing is carried by two small in-game beats, not backstory:
-      - Title screen: a line or two setting up the errand — Iris has a
-        message to deliver, she can only travel by rainbow, build her one
-        from the ground up. The bigger the rainbow, the happier she is.
+      - Title screen: the LOAD → TITLE → GAME flow now exists (see CHANGELOG)
+        but TITLE just shows "unidrill corp" + a start prompt. Give it a line
+        or two setting up the errand — Iris has a message to deliver, she can
+        only travel by rainbow, build her one from the ground up. The bigger
+        the rainbow, the happier she is. Rename LOAD/TITLE copy to match.
       - End screen: after the sky rainbow finishes drawing itself in, Iris
         walks it — on at the near foot, over the apex, off toward her
         destination. How far she gets / how sprightly she looks scales with
@@ -97,8 +114,6 @@ as they land — this list stays scoped to open work.
       score headline, and a new end-screen "Iris crossing" beat.
       Other names considered and dropped: Gusher, Bloomshaft, "Colours Shall
       Rise", Bloomwright, Arcus, "Seven Below".
-- [ ] Create the title screen (currently skipped: boots straight into
-      GAME_SCREEN, see game.js). Carries the Errand of Iris framing above.
 - [ ] Add gamepad support. There's prior art in Jerome's old veggie-ninja repo:
       https://github.com/herebefrogs/veggie-ninja/blob/master/src/js/gamepad.js
       (and possibly an older commit in gamejam-boilerplate's own history).

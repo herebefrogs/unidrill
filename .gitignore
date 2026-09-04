@@ -3,3 +3,16 @@ node_modules
 keys.json
 .DS_Store
 .claude/worktrees
+
+# Music prototyping scaffold — vendored voxby/SoundBox sources are GPL3 and must
+# not land in the game repo; WAV previews are large. Only the chosen song data
+# + player-small.js (zlib) get committed, into src/, once an engine is picked.
+/tools/voxby/*.js
+/tools/voxby/out/
+/tools/zzfxm/zzfx-pure.mjs
+/tools/zzfxm/out/
+/tools/_wav_previews/
+/tools/audition.html
+!/tools/voxby/gen.mjs
+!/tools/voxby/measure.mjs
+!/tools/voxby/check.mjs

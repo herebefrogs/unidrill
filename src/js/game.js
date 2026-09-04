@@ -3,8 +3,10 @@ import { isPointerDown, isPointerUp, pointerCanvasPosition, pointerDirection, po
 import { isMobile } from './mobile';
 import { checkMonetization, isMonetizationEnabled } from './monetization';
 import { share } from './share';
-import { loadSongs, playSound, playSong } from './sound';
+import { loadSongs, playSound, playSong, renderSong, playMusic, resumeAudio, suspendAudio } from './sound';
 import { initSpeech } from './speech';
+import SONG_GAME from './song-game';
+import SONG_TITLE from './song-title';
 import { save, load } from './storage';
 import { ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, CHARSET_SIZE, initCharset, renderText, initTextBuffer, clearTextBuffer, renderAnimatedText } from './text';
 import { clamp, getRandSeed, setRandSeed, loadImg, lerp } from './utils';
@@ -17,11 +19,12 @@ let konamiIndex = 0;
 
 // GAMEPLAY VARIABLES
 
-const TITLE_SCREEN = 0;
-const GAME_SCREEN = 1;
-const REWIND_SCREEN = 2;   // run over: camera fast-walks the drilled path back up to the surface (see updateRewind), then -> END_SCREEN
-const END_SCREEN = 3;
-let screen = GAME_SCREEN; // TODO restore TITLE_SCREEN once GAME_SCREEN is further along
+const LOAD_SCREEN = 0;      // black hold with one "press any key" line - exists only to catch the gesture that unlocks the AudioContext (autoplay policy), then -> TITLE_SCREEN
+const TITLE_SCREEN = 1;
+const GAME_SCREEN = 2;
+const REWIND_SCREEN = 3;   // run over: camera fast-walks the drilled path back up to the surface (see updateRewind), then -> END_SCREEN
+const END_SCREEN = 4;
+let screen = LOAD_SCREEN;
 
 // factor by which to reduce both velX and velY when player moving diagonally
 // so they don't seem to move faster than when traveling vertically or horizontally
@@ -85,6 +88,23 @@ let rewindArmed;                                  // gate for rewindSkip: only t
 let rewindFillI;                                  // trail POINT index the rainbow fill has reached, chasing rewindI down toward 0 (surface) - each segment it passes is stamped into FILLED / DUST_MASK once (see updateRewind's fill loop)
 
 let speak;
+
+// Background music. Two tracks rendered to AudioBuffers at load (renderSong
+// blocks ~40ms/channel): SONG_GAME under GAME + REWIND, SONG_TITLE under
+// LOAD + TITLE + END. musicUnlocked flips on the first input gesture (autoplay
+// needs one); until then updateMusic() is inert. musicBuffer is whatever's
+// looping, so a screen change only restarts playback when the track differs.
+let musicGame, musicTitle, musicBuffer;
+let musicUnlocked;
+
+function updateMusic() {
+  if (!musicUnlocked) return;
+  const want = screen === GAME_SCREEN || screen === REWIND_SCREEN ? musicGame : musicTitle;
+  if (want && want !== musicBuffer) {
+    playMusic(want);
+    musicBuffer = want;
+  }
+}
 
 // RENDER VARIABLES
 
@@ -571,13 +591,37 @@ const pointerMapPosition = () => {
   return [x*CAMERA_WIDTH/c.width + cameraX, y*CAMERA_HEIGHT/c.height + cameraY].map(Math.round);
 }
 
+// LOAD and TITLE are click-through gates. A key still held from the press that
+// passed one gate must not fall straight through the next, so each pass
+// snapshots what's down (bootHeld) and only a key outside that snapshot - or a
+// fresh press after everything's been released (bootReady) - counts. isPointerUp()
+// already consumes the press, so the pointer path needs no extra guard.
+let bootHeld = [];
+let bootReady;
+function bootGatePassed() {
+  if (!anyKeyDown() && !isPointerDown()) bootReady = true;
+  const fresh = whichKeyDown().some(k => !bootHeld.includes(k));
+  if ((bootReady || fresh) && (anyKeyDown() || isPointerUp())) {
+    bootReady = false;
+    bootHeld = whichKeyDown();
+    return true;
+  }
+  return false;
+}
+
 function processInputs() {
   switch (screen) {
+    case LOAD_SCREEN:
+      if (bootGatePassed()) screen = TITLE_SCREEN;
+      break;
     case TITLE_SCREEN:
+      // isKeyUp() consumes the key before the gate sees it, so a konami key
+      // advances the sequence without also starting the game - keep this above
+      // the gate call.
       if (isKeyUp(konamiCode[konamiIndex])) {
         konamiIndex++;
       }
-      if (anyKeyDown() || isPointerUp()) {
+      if (bootGatePassed()) {
         startGame();
       }
       break;
@@ -684,6 +728,11 @@ function update() {
   // outside the screen guards: particles in flight when the run ends still
   // finish flying through the rewind and onto END_SCREEN instead of freezing.
   updateParticles();
+
+  // swap the track when the screen has changed to one on the other side of the
+  // GAME/END music split (cheap no-op otherwise; covers every screen path,
+  // including the resize-abandoned rewind -> END).
+  updateMusic();
 };
 
 // the drill head (hero centre) in world-x / underground-y - the scroll-invariant
@@ -1202,10 +1251,17 @@ function render() {
   clearTextBuffer();
 
   switch (screen) {
+    case LOAD_SCREEN:
+      // pure black - just the gesture catcher. Fill the exact rect blit() reads
+      // (MAP isn't copied here, so clearBuffer() would leave stale pixels).
+      BUFFER_CTX.fillStyle = '#000';
+      BUFFER_CTX.fillRect(Math.floor(cameraX), Math.floor(cameraY), CAMERA_WIDTH + 1, CAMERA_HEIGHT + 1);
+      renderText(isMobile ? 'tap the screen' : 'press any key', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2, ALIGN_CENTER);
+      break;
     case TITLE_SCREEN:
       clearBuffer();
-      renderText('title screen', CHARSET_SIZE, CHARSET_SIZE);
-      renderText(isMobile ? 'tap to start' : 'press any key', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2, ALIGN_CENTER);
+      renderText('unidrill corp', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 - 2 * HUD_LINE, ALIGN_CENTER, HUD_SCALE);
+      renderText(isMobile ? 'tap to start' : 'press any key to start', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2, ALIGN_CENTER);
       if (konamiIndex === konamiCode.length) {
         renderText('konami mode on', CAMERA_WIDTH - CHARSET_SIZE, CHARSET_SIZE, ALIGN_RIGHT);
       }
@@ -1581,9 +1637,11 @@ function toggleLoop(value) {
   running = value;
   if (running) {
     lastTime = performance.now();
+    resumeAudio();               // no-op until the first gesture has unlocked it
     loop();
   } else {
     cancelAnimationFrame(requestId);
+    suspendAudio();              // else the looping track plays on over a hidden/paused tab
   }
 };
 
@@ -1601,8 +1659,27 @@ onload = async (e) => {
   // speak = await initSpeech();
   renderMap();
 
+  // Pre-render both tracks to buffers. GAME first (needed the moment play
+  // starts); TITLE deferred a tick so its ~90ms doesn't stack onto the same
+  // frame - it's not needed until the first run ends.
+  musicGame = renderSong(SONG_GAME);
+  setTimeout(() => { musicTitle = renderSong(SONG_TITLE); });
+
   toggleLoop(true);
 };
+
+// Autoplay is blocked until a gesture: unlock the context on the first key or
+// pointer press, then let updateMusic() start the track for the live screen.
+// Recording an input isn't gameplay state, so this belongs in a listener.
+const unlockMusic = () => {
+  musicUnlocked = true;
+  resumeAudio();
+  updateMusic();
+  removeEventListener('keydown', unlockMusic);
+  removeEventListener('pointerdown', unlockMusic);
+};
+addEventListener('keydown', unlockMusic);
+addEventListener('pointerdown', unlockMusic);
 
 // derive both viewport axes from the live window size at the fixed
 // RENDER_SCALE (so on-screen sizes never change), clamped to [VIEW_MIN,

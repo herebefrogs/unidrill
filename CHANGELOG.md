@@ -253,3 +253,43 @@ Roughly in build order, oldest first.
       the knob centre can sit from the anchor) + a knob disc on the finger.
       `DEBUG_POINTER` (game.js, off) swaps in the full breakdown — pad ring,
       per-axis dead bands, steering spoke, raw finger dot — for tuning.
+
+- [x] Background music (was part of "Music and sound effects"; SFX still
+      open). Engine choice: prototyped both the boilerplate's ZzFXM and
+      [voxby](https://github.com/Rybar/voxby) (a SoundBox-based tracker) in an
+      in-browser audition page, and picked voxby on sound quality — no going
+      back. What shipped: `src/js/player.js` (SoundBox `player-small.js`,
+      zlib-licensed, trimmed to init/generate/createAudioBuffer, ~1.4 KB gz);
+      two tracks composed in the voxby tracker and exported as compacted data
+      modules (`src/js/song-game.js` — Battle 146 bpm, ~0.5 KB gz;
+      `src/js/song-title.js` — Menu 100 bpm, ~0.3 KB gz); `renderSong` /
+      `playMusic` / `stopMusic` / `resumeAudio` / `suspendAudio` in
+      `sound.js`. Both tracks render to looping `AudioBuffer`s at load
+      (`renderSong`, ~0.1 s each; the title track is deferred a tick so the
+      costs don't stack on one frame). `updateMusic()` in `update()` swaps the
+      track whenever the screen crosses the GAME/menu line (game track under
+      GAME + REWIND, title track under LOAD + TITLE + END) — keyed off `screen`
+      so every path is covered, including a resize-abandoned rewind. Context
+      suspends on pause / tab-hide, resumes on unpause. Autoplay unlock is a
+      one-shot `keydown`/`pointerdown` listener that `resumeAudio()`s
+      synchronously in the gesture (RAF is a frame too late for iOS). Seed
+      reproduction of a tracker song from the headless composer proved
+      unreliable (pinning any param shifts the RNG stream), so the tracker
+      exports in `tools/exports/` are the source of truth; `tools/` also holds
+      the audition-page builder and promote script (vendored voxby composer
+      sources are GPL3 and gitignored). ZzFXM (`zzfxM` / `loadSongs` /
+      `playSong`) is left in `sound.js` unused, flagged for the byte-golf pass.
+
+- [x] Boot flow / title screen (was "Create the title screen"; the Errand of
+      Iris framing copy is still open under that item). `LOAD → TITLE → GAME`
+      instead of booting straight into `GAME_SCREEN`. `LOAD` is a black screen
+      with one "press any key" line — its only job is to catch the first input
+      gesture, which is what unlocks the Web Audio context (needed for the
+      music). `TITLE` shows "unidrill corp" + a start prompt. Both are
+      click-through gates via `bootGatePassed()`, which snapshots the keys
+      held when a gate is passed (`bootHeld`) plus a released-then-pressed path
+      (`bootReady`) so a key still down from passing one gate doesn't fall
+      straight through the next — the same shape as the END retry gate. The
+      pointer path needs no guard: `isPointerUp()` already consumes the press.
+      Screen constants renumbered `LOAD=0 … END=4` (all comparisons are `===`,
+      no ordinal math).

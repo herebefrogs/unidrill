@@ -1,7 +1,9 @@
-// TODO ZzFX & ZzFX Music aren't written as modules easily importable
-// as they install in the global space, it's not easy for Rollup to include them in the game's IIFE
+// ZzFX (sound effects) + SoundBox/voxby CPlayer (background music) share one
+// AudioContext (zzfxX). Music helpers are at the bottom of this file.
 
 // ZzFX Music's optimized copy of ZzFX by Frank Force https://github.com/KilledByAPixel/ZzFX
+
+import { CPlayer } from './player';
 
 // zzfxX - the common audio context
 const zzfxX=new(window.AudioContext||webkitAudioContext);
@@ -47,3 +49,40 @@ export const playSong = songData => zzfxP(...songData);
  * @returns ?
  */
 export const playSound = soundData => zzfx(...soundData);
+
+
+// --- Background music (voxby / SoundBox songs, played through player.js) ---
+
+let musicSrc;                                   // the looping BufferSourceNode, or null
+
+/**
+ * Render a voxby-exported song to an AudioBuffer. Synchronous and blocking
+ * (~40 ms per channel) - call at load time, cache the result.
+ * @param {*} data the song's `export default {...}` object
+ */
+export const renderSong = data => {
+  const p = new CPlayer();
+  p.init(data);
+  while (p.generate() < 1) { /* one pass per channel */ }
+  return p.createAudioBuffer(zzfxX);
+};
+
+/** Loop `buffer` as the background track, stopping whatever was playing. */
+export const playMusic = buffer => {
+  stopMusic();
+  musicSrc = zzfxX.createBufferSource();
+  musicSrc.buffer = buffer;
+  musicSrc.loop = true;
+  musicSrc.connect(zzfxX.destination);
+  musicSrc.start();
+};
+
+export const stopMusic = () => {
+  if (musicSrc) { try { musicSrc.stop(); } catch (e) {} musicSrc = null; }
+};
+
+// The context starts suspended (no autoplay without a gesture) and must be
+// suspended again on tab-hide / pause or the loop keeps sounding. Safe to call
+// unconditionally.
+export const resumeAudio = () => { try { zzfxX.resume(); } catch (e) {} };
+export const suspendAudio = () => { try { zzfxX.suspend(); } catch (e) {} };

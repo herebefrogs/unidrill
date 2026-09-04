@@ -350,11 +350,32 @@ pulse.
 Stretch goal: anaglyph red/cyan mode — requires background/entity depth-plane
 separation for parallax.
 
+## Screens
+
+Boot flow is `LOAD → TITLE → GAME → REWIND → END`, then `END → GAME` on retry
+(no return to the title). `LOAD` is a black screen with a single "press any
+key" line — it exists only to catch the first input gesture, which is what
+unlocks the Web Audio context (browsers block autoplay until then). `TITLE`
+shows the game name and a start prompt. Both are click-through gates:
+`bootGatePassed()` snapshots the keys held when a gate is passed so a key still
+down doesn't fall straight through the next screen (the pointer path
+self-consumes and needs no guard). The `END` retry has its own equivalent gate
+(`endReady` / `endHeld`, see Run end).
+
 ## Music & sound
 
-Chiptune background music, via ZzFXM (already vendored in `src/js/sound.js`).
-Sound effects on the key beats: collecting a dust cell, the dust-counter
-tally-tick, the drill stalling out, and the end-run rainbow sprouting.
+Peppy chiptune background music, via a [voxby](https://github.com/Rybar/voxby)
+/ SoundBox player (`src/js/player.js`, zlib-licensed, ~1.4 KB gz). Two tracks,
+composed in the voxby tracker and exported as data modules
+(`src/js/song-game.js`, `src/js/song-title.js`): a driving one under
+`GAME` + `REWIND`, a calmer one under `LOAD` + `TITLE` + `END`. Both are
+rendered to looping `AudioBuffer`s once at load (`renderSong`, ~0.1 s each —
+the title track is deferred a tick so the two costs don't stack on one frame)
+and swapped by `updateMusic()` whenever the screen crosses the GAME/menu line.
+The context is suspended on pause / tab-hide and resumed on unpause. The
+ZzFXM helpers still in `sound.js` are now unused (flagged for the byte-golf
+pass). Sound effects — collecting a dust cell, the dust-counter tally-tick,
+the drill stalling out, the end-run rainbow sprouting — are still TODO.
 
 ## Replayability
 
