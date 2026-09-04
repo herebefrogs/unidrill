@@ -174,12 +174,13 @@ Considered and deferred: a distinct pattern for the beam (brighter / its own
 ramp / a travelling pulse) so it reads as a stream rather than tunnel-shaped
 dust — the shared treatment looked good enough to not spend tuning time on.
 
-The END_SCREEN retry is gated so a steering key still held when the run ended
-(or one held to skip the rewind) doesn't restart instantly — but it also
-can't lock the retry out: restart on either a full release-then-press
-(`endReady`), or a press of any key that wasn't already held when the screen
-appeared (`endHeld`, snapshotted at game-over and kept current through the
-rewind).
+END_SCREEN shows a chevron menu — **Try again** (replays the same seed),
+**Share your score**, **Back to main menu** — under the score line, same
+Up/Down/Enter/tap interaction as the title menu (see Screens). It's gated the
+same way as the title menu's first arming: a steering key still held when the
+run ended (or one held to skip the rewind) can't fire whatever item the
+chevron lands on — `endArmed` only goes true once every key/pointer has been
+released at least once since the screen appeared.
 
 Dense dust tops momentum back up (`MOMENTUM.denseBoost` px/sec per dense
 cell dug — `digShaft()` clears several cells per tick, so entering a patch
@@ -208,10 +209,12 @@ while the surface is on screen — once deep there's no reference frame — so
 it's tuned for that: the drill is ~0.9 m, a dust cell ~0.25 m, a straight
 sand dive bottoms out around 48 m.
 
-The END screen repeats `Shaft:` / `Dust:` plus a `Score:` line: labels
-left-aligned on a shared origin, values on a second shared origin one
-label-field in (measured off the widest label, since the proportional font
-won't line up on padding spaces alone), so the value column lines up.
+END_SCREEN keeps the same top-left `Speed:`/`Shaft:`/`Dust:` HUD running
+(`renderHud()`, shared with `GAME_SCREEN` — the corner stays put across the
+rewind instead of a score readout popping up somewhere new), speed pinned to
+`0m/s` (`endGame()` zeroes `hero.momentum`) since the run is over. A
+centred `Score:` line is the only new readout, above the Try again / Share
+your score / Back to main menu menu (see Run end).
 
 ## Controls
 
@@ -238,7 +241,12 @@ up whether descending or climbing, no inversion between the legs.
   angle reaches the heading math; the ramp magnitude drives the on-screen
   overlay (base disc + knob on the finger; `DEBUG_POINTER` shows the full
   model breakdown).
-- **M**: step the master volume (see Music & sound). Works on every screen.
+- **M**: step the master volume (see Music & sound). Works on every screen —
+  undocumented on the title menu's Music item (like Space/Enter's overlap with
+  the chevron menu, it's a shortcut for a control that's already reachable the
+  normal way).
+- **Esc**: on `END`/`HIGHSCORE`, back to `TITLE` — same destination as those
+  screens' "Back to main menu" menu item, just a shortcut past it.
 
 **World edges.** The map is unbounded left, right and down — the drill can
 roam sideways as far as it likes, momentum decay is the only limit on a
@@ -391,9 +399,9 @@ separate boot/loading screen. The title menu's first arming is a
 click-through gate: `titleArmed` snapshots the keys held when the screen is
 reached (e.g. backing out of `HIGHSCORE`) so a key still down doesn't
 instantly fire whatever menu item the cursor sits on (the pointer path
-self-consumes and needs no guard). The `END` retry and `HIGHSCORE` have their
-own equivalent gates (`endReady`/`endHeld`, `highscoreReady`; see Run end).
-Pressing Start is also what unlocks the Web Audio context — browsers block
+self-consumes and needs no guard). `END` and `HIGHSCORE` have their own
+equivalent gates (`endArmed`, `highscoreReady`; see Run end). Pressing Start
+is also what unlocks the Web Audio context — browsers block
 autoplay until a user gesture, and Start's key/tap press is the first one
 that's guaranteed to happen (see Music & sound).
 
@@ -401,7 +409,7 @@ that's guaranteed to happen (see Music & sound).
 dust-patched backdrop, the resting unicorn (offset left of its real spawn
 point — see below), a small `Seed: TERRAIN-DUST` corner label (js13kgames
 runs entries in an iframe, hiding the URL bar and the seed with it), and a
-menu: **Start**, **[M]usic: N%**, **Highscores**, **New seed**. Up/Down move
+menu: **Start**, **Music: N%**, **Highscores**, **New seed**. Up/Down move
 the selection (a `>` chevron in its own column so labels never shift), Enter
 triggers it; each row also has a tap-friendly hit box for mobile. Selecting
 Start hops the resting unicorn along a semicircular arc into its real
@@ -410,10 +418,14 @@ game-start pose (`titleJumpT`/`titleJumpPose`, eased) before handing off to
 just idling on the title art.
 
 `HIGHSCORE` shows the same dust/unicorn backdrop under a `Seed | Score | Date`
-table (see Replayability) and doubles as a seed picker: Up/Down/Enter or a tap
-on a row loads that seed and drops back to `TITLE` on it (so Start still
-plays the jump-in) rather than starting the game directly. A tap elsewhere,
-or any other key, also returns to `TITLE`.
+table (see Replayability) and doubles as a seed picker. **Back to main menu**
+is appended as one more row below the table (`highscoreLayout()` treats it as
+just another entry, a blank row's gap under the last score), so Up/Down wrap
+through it the same as any chevron menu — Down off the last score lands on
+it, Down again wraps to the first score. Enter/Space or a tap on a score row
+loads that seed and drops back to `TITLE` on it (so Start still plays the
+jump-in); the same on the Back row just returns to `TITLE`. Esc is a shortcut
+straight to `TITLE` from here too (see Controls).
 
 ## Music & sound
 
@@ -426,7 +438,7 @@ The track is rendered to a looping `AudioBuffer` once at load (`renderSong`,
 ~0.1 s) and started/stopped by `updateMusic()` whenever the screen crosses in
 or out of that GAME/REWIND/END span. The context is suspended on pause /
 tab-hide and resumed on unpause.
-**M** (or the title menu's `[M]usic: N%` item) steps the master gain — shared
+**M** (or the title menu's `Music: N%` item) steps the master gain — shared
 by music and SFX alike — up by 10 points, wrapping from 50% back to 0%;
 starts at 30% (`MASTER_VOLUME` in `sound.js`, tuned down from the GainNode's
 implicit 100%, which played too loud). Works on every screen. The ZzFXM
@@ -459,10 +471,19 @@ back to the URL so any run is a shareable link. (Seed 0 — unreachable through
 The title menu's **New seed** item rerolls a fresh random terrain/dust pair
 (`getRandSeed(true)`, uppercased for readability) with no typing required,
 re-seating and repainting the underground on it immediately so the title
-backdrop never shows stale terrain. Still TODO: an explicit "share your
-seed" control (helper in `share.js`) — the resolved seed is already in the
-URL and shown on the title screen (see Screens), so this is mostly a
-share/copy button.
+backdrop never shows stale terrain.
+
+**Sharing.** END_SCREEN's **Share your score** menu item (`shareScore()`)
+hands `share.js` a payload built from the run just finished: title, a text
+line ("I dug a *N* meter long shaft and collected *M* rainbow dust in
+Errands of Iris..."), and a `url` carrying the run's resolved seed — so the
+link a friend opens drops them onto the same terrain/dust pair. Where the
+platform supports the Web Share API's `files` array (checked via
+`navigator.canShare({files})` on its own, per spec, before folding it into
+the full payload), it also attaches a PNG snapshot of the current frame
+(`c.toBlob()`) — the sky rainbow the player just grew. `share.js` falls back
+to a Twitter-intent URL (text + url only, no image) when native sharing
+isn't available.
 
 **Highscores.** A per-seed table under the `2026.errands-of-iris.highscores`
 storage key (`storage.js`, JSON-serialised), each entry `{ score, date }`

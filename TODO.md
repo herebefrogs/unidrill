@@ -11,14 +11,6 @@ as they land — this list stays scoped to open work.
       is still stubbed. Background music is done (voxby/SoundBox — see
       CHANGELOG). Layered stems were considered and dropped (one intensity,
       not worth the bytes).
-- [ ] Seed sharing UI. The underground generation is seeded and the spawn is
-      deterministic per seed (see CHANGELOG — `seedMap()`/`setMapSeed()`,
-      two-seed `?seed=terrain-dust` param, default `UNICORNS-RAINBOWS`,
-      `pickSpawnX`/`seatSpawn`). The title menu's "New seed" item already
-      rerolls a fresh random pair for replayability, and the resolved seed is
-      shown on the title screen (see CHANGELOG — Highscore). Still missing:
-      an explicit "share your seed" control (helper in src/js/share.js) — the
-      seed is already in the URL, so this is mostly a share/copy button.
 - [ ] Draw Iris and animate her on the title and end screens. The title-
       screen framing (name, copy, speech bubble) has landed — see CHANGELOG,
       "Errands of Iris title screen" — but Iris herself is still only implied

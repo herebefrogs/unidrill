@@ -1,4 +1,4 @@
-import { isKeyDown, anyKeyDown, isKeyUp, whichKeyDown } from './inputs/keyboard';
+import { isKeyDown, anyKeyDown, isKeyUp } from './inputs/keyboard';
 import { isPointerDown, isPointerUp, pointerCanvasPosition, pointerDirection, pointerPad } from './inputs/pointer';
 import { isMobile } from './mobile';
 import { checkMonetization, isMonetizationEnabled } from './monetization';
@@ -59,8 +59,8 @@ const MOMENTUM = {
 let hero;
 let heroWentDeep;                              // armed once depth passes MOMENTUM.winMinDepth; gates the resurface win
 let outcome;                                   // true = resurfaced with momentum to spare, false = momentum ran out underground; not surfaced to the player yet (END_SCREEN shows one neutral headline), kept for future share/highscore text
-let endReady;                                  // END_SCREEN: true once all inputs held at game-over have been released
-let endHeld;                                    // keys already down when END_SCREEN began (held over from gameplay / a rewind skip) - a press of anything NOT in here also restarts, so a leftover key doesn't lock the retry out (see processInputs END_SCREEN)
+let endArmed;                                  // END_SCREEN: release-then-fresh-press gate, same idea as titleArmed - a key/tap held over from the rewind (or from skipping it) mustn't instantly fire the menu item under the cursor
+let endIndex = 0;                               // END_SCREEN menu selection (see endMenuItems/endMenuLayout)
 let depth;                                     // px below the surface right now (world-space y). Still drives heroWentDeep + the resurface end - just no longer the score or a HUD line (both axes drill infinitely, so absolute depth reads arbitrary); see tunnel.
 let tunnel;                                     // px of virgin ground carved this run - accumulated in moveHero() while the drill's leading edge is cutting undug material (re-drilling an old shaft doesn't add). The scored "how far did you drill" measure; HUD "shaft".
 let dust;                                       // rainbow-dust cells collected this run (= DUG ∩ sampleDust), tallied when its particle lands on the counter (or instantly if the run ends first, see endGame()).
@@ -397,6 +397,31 @@ const DUST_COUNTER_Y = CHARSET_SIZE + 2 * HUD_LINE;   // 3rd HUD line (speed, sh
 const DUST_POP_DURATION = 0.18;                       // seconds: the counter value swells to 2x and back on each tally
 const SPEED_VALUE_Y = CHARSET_SIZE;                   // 1st HUD line
 
+// top-left Speed/Shaft/Dust readout, shared by GAME_SCREEN and END_SCREEN -
+// on the latter it just keeps showing the run's final numbers (nothing resets
+// them until the next startGame()), so the corner stays put across the
+// rewind instead of the score popping up in a different spot each time.
+function renderHud() {
+  renderText('Speed:', HUD_X, SPEED_VALUE_Y, ALIGN_LEFT, HUD_SCALE);
+  // value drawn separately so only the number swells (2x and back) while
+  // momentum sits in the overtorque band - scale tracks how far past `max`
+  // it is, so the pop rides the dense-patch boost up and its bleed down.
+  {
+    const str = Math.round(hero.momentum / PX_PER_M) + 'm/s';
+    const s = HUD_SCALE * (1 + clamp((hero.momentum - MOMENTUM.max) / (MOMENTUM.overMax - MOMENTUM.max), 0, 1));
+    const cx = SPEED_VALUE_X + textWidth(str, HUD_SCALE) / 2;
+    renderText(str, cx, SPEED_VALUE_Y - (s - HUD_SCALE) * CHARSET_SIZE / 2, ALIGN_CENTER, s);
+  }
+  renderText('Shaft:    ' + Math.round(tunnel / PX_PER_M) + 'm', HUD_X, CHARSET_SIZE + HUD_LINE, ALIGN_LEFT, HUD_SCALE);
+  renderText('Dust:', HUD_X, DUST_COUNTER_Y, ALIGN_LEFT, HUD_SCALE);
+  // the value briefly swells to 2x and back on each tally (see dustPop); grow about the number's own centre so it pops in place
+  {
+    const str = '' + dust;
+    const s = HUD_SCALE * (1 + Math.sin(clamp((gameTime - dustPop) / DUST_POP_DURATION, 0, 1) * Math.PI));
+    const cx = DUST_COUNTER_X + textWidth(str, HUD_SCALE) / 2;
+    renderText(str, cx, DUST_COUNTER_Y - (s - HUD_SCALE) * CHARSET_SIZE / 2, ALIGN_CENTER, s);
+  }
+}
 
 const ATLAS = {};
 const FRAME_DURATION = 0.1; // duration of 1 animation frame, in seconds
@@ -457,12 +482,11 @@ function seatSpawn() {
   followCamera();                             // hard lock (no smooth): snaps focus + zeroes spring velocity
 }
 
-function startGame() {
-  // setRandSeed(getRandSeed());
-  // if (isMonetizationEnabled()) { unlockExtraContent() }
-  DUG.clear();
-  FILLED.clear();
-  hero = {
+// a fresh hero at the spawn pose - shared by startGame() (drops it into
+// GAME_SCREEN) and goTitle() (drops it back onto the title backdrop), so
+// neither leaves the other's leftover angle/momentum/legPhase lying around.
+function newHero() {
+  return {
     x: CAMERA_WIDTH - HERO_W / 2,    // buffer centre (buffer is 2x CAMERA_WIDTH)
     y: SURFACE_Y - HERO_H,          // feet on the ground, not center
     w: HERO_W,
@@ -473,6 +497,14 @@ function startGame() {
     momentum: MOMENTUM.initial,
     legPhase: 0,
   };
+}
+
+function startGame() {
+  // setRandSeed(getRandSeed());
+  // if (isMonetizationEnabled()) { unlockExtraContent() }
+  DUG.clear();
+  FILLED.clear();
+  hero = newHero();
   seatSpawn();                       // mapOffsetX + camera onto the clay-free spawn column
   heroWentDeep = false;
   outcome = undefined;
@@ -661,7 +693,10 @@ function titleMenuItems() {
     // jiggle the whole centred block every step; '50%' covers the widest
     // case (VOLUME_MAX) so the reserved width never moves. Fine if the live
     // label sits a touch narrower than that - it's left-aligned, not centred.
-    { label: '[M]usic: ' + volumePct + '%', sizeLabel: '[M]usic: 50%', action: cycleVolume },
+    // M still cycles it directly (see processInputs) - undocumented in the
+    // label, same as P for pause; Up/Down+Enter/Space already makes menu
+    // navigation obvious enough without also flagging every shortcut.
+    { label: 'Music: ' + volumePct + '%', sizeLabel: 'Music: 50%', action: cycleVolume },
     { label: 'Highscores', action: goHighscores },
     { label: 'New seed', action: rerollSeed },
   ];
@@ -762,7 +797,7 @@ function titleJumpPose() {
 // jump animation from there. A tap elsewhere, or any other key, also returns
 // to the title menu (on whatever seed was already active). highscoreReady is
 // the same "wait for a full release before a fresh
-// press counts" gate as endReady/titleArmed, needed because Enter/tap
+// press counts" gate as endArmed/titleArmed, needed because Enter/tap
 // selecting the menu item is often still held down on the very first
 // HIGHSCORE_SCREEN frame.
 let highscoreReady;
@@ -793,6 +828,7 @@ function highscoreRows() {
 // chevron gutter (same idea as titleMenuLayout's) sits left of the Seed
 // column so the selected-row marker never shifts the table; each row also
 // gets a titleMenuLayout-style padded tap box spanning the full table width.
+const HS_BACK_LABEL = 'Back to main menu';
 function highscoreLayout() {
   const data = highscoreRows();
   const cols = [
@@ -802,14 +838,19 @@ function highscoreLayout() {
   ];
   const colW = cols.map(vals => Math.max(...vals.map(v => textWidth(v, HS_SCALE))));
   const chevronW = textWidth('>  ', HS_SCALE);
-  const tableW = chevronW + colW[0] + colW[1] + colW[2] + HS_COL_GAP * 2;
+  // the table has to be at least wide enough for the Back row's label too, in
+  // case the score list is short/empty and the label would otherwise overhang.
+  const tableW = Math.max(chevronW + colW[0] + colW[1] + colW[2] + HS_COL_GAP * 2, chevronW + textWidth(HS_BACK_LABEL, HS_SCALE));
   const left = CAMERA_WIDTH / 2 - tableW / 2;
   const colX = [left + chevronW, left + chevronW + colW[0] + HS_COL_GAP, left + chevronW + colW[0] + colW[1] + HS_COL_GAP * 2];
   const top = CAMERA_HEIGHT / 2 + HS_ROW;   // a row below the surface line, header first
-  const rows = data.map((r, i) => {
-    const y0 = top + (i + 1) * HS_ROW;
-    return { ...r, chevronX: left, x0: left - TITLE_MENU_PAD, x1: left + tableW + TITLE_MENU_PAD, y0, y1: y0 + HS_ROW };
-  });
+  const rowBox = y0 => ({ chevronX: left, x0: left - TITLE_MENU_PAD, x1: left + tableW + TITLE_MENU_PAD, y0, y1: y0 + HS_ROW });
+  const rows = data.map((r, i) => ({ ...r, ...rowBox(top + (i + 1) * HS_ROW) }));
+  // Back to main menu is appended as one more row (not a score), a blank
+  // row's gap below the list - so Down off the last entry lands here and Down
+  // again wraps to the first score, same as any other chevron menu (see
+  // processInputs' HIGHSCORE_SCREEN case and the render() case below).
+  rows.push({ back: true, label: HS_BACK_LABEL, ...rowBox(top + (data.length + 2) * HS_ROW) });
   return { rows, colX, top };
 }
 
@@ -823,6 +864,94 @@ function selectSeed(seed) {
   seatSpawn();
   renderMap();
   screen = TITLE_SCREEN;
+}
+
+// HIGHSCORE_SCREEN row action: the appended Back row (see highscoreLayout)
+// just leaves via goTitle(), any other row loads that seed via selectSeed().
+function selectRow(row) {
+  if (row.back) goTitle(); else selectSeed(row.seed);
+}
+
+// END_SCREEN menu: Retry jumps straight back into a fresh run on the same
+// seed; Title drops back to TITLE_SCREEN (so Music/Highscores/New seed are
+// reachable) without replaying the title hop; Share hands the run's stats to
+// share.js. Resets the world same as startGame() (DUG/FILLED cleared, a fresh
+// hero, reseated + repainted) so the backdrop shows undug ground and the
+// unicorn at its usual title pose - not the just-finished run's tunnel with
+// the drill sitting wherever it stalled/surfaced. titleJumpT is reset to 0
+// too: it was left at 1 (jump complete) from the Start press that began this
+// run and was never wound back, so titleJumpPose() was landing on its t=1
+// pose (angle PI/2, no offset - the unicorn drawn facing straight down right
+// on top of the just-dug hole) instead of the t=0 resting pose.
+// titleArmed=false for the same reason goHighscores resets
+// highscoreReady - a key/tap still down from picking this item mustn't
+// instantly fire whatever title-menu item the chevron happens to rest on.
+function goTitle() {
+  DUG.clear();
+  FILLED.clear();
+  hero = newHero();
+  seatSpawn();
+  renderMap();
+  titleJumpT = 0;
+  titleJumping = false;
+  screen = TITLE_SCREEN;
+  titleArmed = false;
+}
+function endMenuItems() {
+  return [
+    { label: 'Try again', action: startGame },
+    { label: 'Share your score', action: shareScore },
+    { label: 'Back to main menu', action: goTitle },
+  ];
+}
+
+// share the run's stats (and, where the platform supports it, a screenshot of
+// the current frame - the rainbow the player just grew) through share.js.
+// navigator.share() needs to fire inside the user gesture that triggered it;
+// c.toBlob()'s callback lands within the same transient-activation window in
+// every browser this has been checked against, so the await is safe here.
+// canShare({files}) is checked on its own first (per the Web Share API docs -
+// title/text/url shouldn't influence whether file-sharing is supported)
+// before being folded into the full payload share() ends up sending.
+async function shareScore() {
+  const data = {
+    title: 'Errands of Iris',
+    text: `I dug a ${Math.round(tunnel / PX_PER_M)} meter long shaft and collected ${dust} rainbow dust in Errands of Iris, a game made by @herebefrogs for #js13k 2026`,
+    url: `https://js13kgames.com/2026/games/errands-of-iris?seed=${runSeed}`,
+  };
+  if (navigator.canShare) {
+    const blob = await new Promise(resolve => c.toBlob(resolve, 'image/png'));
+    if (blob) {
+      const file = new File([blob], 'errands-of-iris.png', { type: 'image/png' });
+      if (navigator.canShare({ files: [file] })) data.files = [file];
+    }
+  }
+  share(data);
+}
+
+// same chevron/left-aligned-label/padded-tap-box scheme as titleMenuLayout
+// (reusing its TITLE_MENU_* constants - same scale reads right here too),
+// stacked under the Score line instead of centred in the lower half.
+function endMenuLayout() {
+  const items = endMenuItems();
+  const chevronW = textWidth('>  ', TITLE_MENU_SCALE);
+  const labelW = Math.max(...items.map(item => textWidth(item.label, TITLE_MENU_SCALE)));
+  const blockW = chevronW + labelW;
+  const left = CAMERA_WIDTH / 2 - blockW / 2;
+  const top = CAMERA_HEIGHT / 2 + 3 * HUD_LINE;   // a couple lines below the Score row (see END_SCREEN render)
+  return items.map((item, i) => {
+    const y0 = top + i * TITLE_MENU_ROW;
+    return {
+      ...item,
+      textY: y0 + (TITLE_MENU_ROW - TITLE_MENU_SCALE * CHARSET_SIZE) / 2,
+      chevronX: left,
+      labelX: left + chevronW,
+      x0: left - TITLE_MENU_PAD,
+      x1: left + blockW + TITLE_MENU_PAD,
+      y0,
+      y1: y0 + TITLE_MENU_ROW,
+    };
+  });
 }
 
 // Iris's title-screen-only speech bubble: a plain white rounded rect (comic-
@@ -939,52 +1068,44 @@ function processInputs() {
       // then also waits for release before arming its retry.)
       if (!anyKeyDown() && !isPointerDown()) rewindArmed = true;
       if (rewindArmed && (anyKeyDown() || isPointerDown())) rewindSkip = true;
-      // keep the "leftover keys" snapshot current: whatever is held on the last
-      // rewind frame (including the key that skipped it) is what END_SCREEN must
-      // treat as held-over rather than a restart press.
-      endHeld = whichKeyDown();
       break;
-    case END_SCREEN:
-      if (isKeyUp('KeyT')) {
-        // TODO can I share an image of the game?
-        share({
-          title: document.title,
-          text: 'Check this game template made by @herebefrogs',
-          url: 'https://bit.ly/gmjblp'
-        });
+    case END_SCREEN: {
+      // same release-then-fresh-press gate as titleArmed - a key/tap held over
+      // from the rewind (or from skipping it) mustn't instantly fire whichever
+      // menu item the chevron happens to rest on.
+      if (!anyKeyDown() && !isPointerDown()) endArmed = true;
+      if (!endArmed) break;
+      const items = endMenuLayout();
+      if (isKeyUp('ArrowUp')) endIndex = (endIndex - 1 + items.length) % items.length;
+      if (isKeyUp('ArrowDown')) endIndex = (endIndex + 1) % items.length;
+      if (isKeyUp('Enter') || isKeyUp('Space')) items[endIndex].action();
+      if (isKeyUp('Escape')) goTitle();
+      if (isPointerUp()) {
+        const [px, py] = pointerViewportPosition();
+        const hit = items.findIndex(it => px >= it.x0 && px <= it.x1 && py >= it.y0 && py <= it.y1);
+        if (hit >= 0) { endIndex = hit; items[hit].action(); }
       }
-      // a steering key still down when the run ended (or one held to skip the
-      // rewind) must not restart instantly - but it also mustn't lock the retry
-      // out. Two ways to restart: release everything then press anything
-      // (endReady), OR press a key that wasn't already held when END_SCREEN
-      // began (not in endHeld - a genuinely fresh press). (temporary: straight
-      // back into a new run, no title screen.)
-      if (!anyKeyDown() && !isPointerDown()) endReady = true;
-      const freshPress = whichKeyDown().some(k => !endHeld.includes(k));
-      if ((endReady || freshPress) && (anyKeyDown() || isPointerUp())) startGame();
       break;
+    }
     case HIGHSCORE_SCREEN: {
-      // same release-then-fresh-press gate as titleArmed/endReady (see
+      // same release-then-fresh-press gate as titleArmed/endArmed (see
       // highscoreReady above).
       if (!anyKeyDown() && !isPointerDown()) highscoreReady = true;
       if (!highscoreReady) break;
       const { rows } = highscoreLayout();
-      // Up/Down/Enter navigate and replay a row - isKeyUp consumes each key
-      // it fires on, so a held Up/Down/Enter can't also trip the generic
-      // "any other key returns" check below on the same frame.
-      if (rows.length) {
-        if (isKeyUp('ArrowUp')) highscoreIndex = (highscoreIndex - 1 + rows.length) % rows.length;
-        if (isKeyUp('ArrowDown')) highscoreIndex = (highscoreIndex + 1) % rows.length;
-        if (isKeyUp('Enter') || isKeyUp('Space')) { selectSeed(rows[highscoreIndex].seed); break; }
-      }
+      // Up/Down/Enter navigate and act on a row - Back to main menu is
+      // appended as the last row (see highscoreLayout), so Down off the last
+      // score lands there, and Down again wraps back to the first score -
+      // same chevron-menu shape as TITLE_SCREEN/END_SCREEN.
+      if (isKeyUp('ArrowUp')) highscoreIndex = (highscoreIndex - 1 + rows.length) % rows.length;
+      if (isKeyUp('ArrowDown')) highscoreIndex = (highscoreIndex + 1) % rows.length;
+      if (isKeyUp('Enter') || isKeyUp('Space')) selectRow(rows[highscoreIndex]);
+      if (isKeyUp('Escape')) goTitle();
       if (isPointerUp()) {
         const [px, py] = pointerViewportPosition();
         const hit = rows.findIndex(r => px >= r.x0 && px <= r.x1 && py >= r.y0 && py <= r.y1);
-        if (hit >= 0) selectSeed(rows[hit].seed);
-        else screen = TITLE_SCREEN;
-        break;
+        if (hit >= 0) { highscoreIndex = hit; selectRow(rows[hit]); }
       }
-      if (anyKeyDown()) screen = TITLE_SCREEN;
       break;
     }
   }
@@ -1092,6 +1213,10 @@ function moveHero() {
 }
 
 function endGame(resurfaced) {
+  // the run is over - zero it so the frozen END_SCREEN readout (renderHud)
+  // reads "speed: 0m/s" instead of whatever momentum the drill still had the
+  // instant it stalled or surfaced.
+  hero.momentum = 0;
   // the run can end (surfacing or bingo fuel) while particles are still
   // mid-flight; tally their dust immediately instead of leaving the score
   // dependent on how much of that cosmetic animation had time to finish.
@@ -1119,8 +1244,8 @@ function endGame(resurfaced) {
   }
 
   outcome = resurfaced;
-  endReady = false;
-  endHeld = whichKeyDown();   // steering keys still down at the stall/resurface - refreshed through the rewind (see processInputs), so END_SCREEN knows what's "leftover" vs a fresh restart press
+  endArmed = false;
+  endIndex = 0;   // land on Retry (see endMenuItems) - a fresh press retries same as before, just via the menu now
 
   // Single bow: foot at the ingress mouth (trail[0]) - where the rewind lands
   // and the bow sprouts, for a stall AND a plain resurface alike. Grow timer
@@ -1426,10 +1551,10 @@ function updateRewind() {
       centerCameraOn(bx, by, true);
       return;
     }
-    // reached the surface: hard-cut there and hand off. endReady is re-cleared
+    // reached the surface: hard-cut there and hand off. endArmed is re-cleared
     // - time passed during the rewind.
     jumpCameraTo(hx, hy);
-    endReady = false;
+    endArmed = false;
     screen = END_SCREEN;
     return;
   }
@@ -1613,25 +1738,7 @@ function render() {
       renderDust();
       renderParticles();
       drawHero();
-      renderText('Speed:', HUD_X, SPEED_VALUE_Y, ALIGN_LEFT, HUD_SCALE);
-      // value drawn separately so only the number swells (2x and back) while
-      // momentum sits in the overtorque band - scale tracks how far past `max`
-      // it is, so the pop rides the dense-patch boost up and its bleed down.
-      {
-        const str = Math.round(hero.momentum / PX_PER_M) + 'm/s';
-        const s = HUD_SCALE * (1 + clamp((hero.momentum - MOMENTUM.max) / (MOMENTUM.overMax - MOMENTUM.max), 0, 1));
-        const cx = SPEED_VALUE_X + textWidth(str, HUD_SCALE) / 2;
-        renderText(str, cx, SPEED_VALUE_Y - (s - HUD_SCALE) * CHARSET_SIZE / 2, ALIGN_CENTER, s);
-      }
-      renderText('Shaft:    ' + Math.round(tunnel / PX_PER_M) + 'm', HUD_X, CHARSET_SIZE + HUD_LINE, ALIGN_LEFT, HUD_SCALE);
-      renderText('Dust:', HUD_X, DUST_COUNTER_Y, ALIGN_LEFT, HUD_SCALE);
-      // the value briefly swells to 2x and back on each tally (see dustPop); grow about the number's own centre so it pops in place
-      {
-        const str = '' + dust;
-        const s = HUD_SCALE * (1 + Math.sin(clamp((gameTime - dustPop) / DUST_POP_DURATION, 0, 1) * Math.PI));
-        const cx = DUST_COUNTER_X + textWidth(str, HUD_SCALE) / 2;
-        renderText(str, cx, DUST_COUNTER_Y - (s - HUD_SCALE) * CHARSET_SIZE / 2, ALIGN_CENTER, s);
-      }
+      renderHud();
       break;
     case REWIND_SCREEN:
       // just the world, scrolling past under the camera - no HUD, no text.
@@ -1650,28 +1757,20 @@ function render() {
       renderDust();
       renderParticles();
       if (!rewound) drawHero();
+      // same corner readout as GAME_SCREEN - just frozen on the run's final
+      // numbers (see renderHud) - so the centre of the screen is free for the
+      // headline/score/menu below instead of repeating Shaft/Dust there too.
+      renderHud();
       // no win/lose split (the run just ends, see endGame()) - but a run that
       // bagged no dust grew no rainbow, so nudge the player to collect next
       // time (the headline is the CAMERA_WIDTH fit constraint, see the
       // RENDER_SCALE comment). outcome is still recorded for future share text.
       renderText(rainbowX2 !== undefined ? 'Double rainbow!' : dust ? 'Well dug!' : 'Dry run!', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 - 2 * HUD_LINE, ALIGN_CENTER, HUD_SCALE + 1);
-      // metric lines: labels left-aligned at mx, values left-aligned at a
-      // shared edge one label-field in (a proportional font won't line up on a
-      // leading space, so label and value are drawn separately). mx roughly
-      // centres the block.
-      {
-        const lw = Math.max(textWidth('Shaft:   ', HUD_SCALE), textWidth('Dust:   ', HUD_SCALE), textWidth('Score:   ', HUD_SCALE));
-        const mx = CAMERA_WIDTH / 2 - (lw + textWidth('99999m', HUD_SCALE)) / 2;
-        const line = (label, value, row) => {
-          const y = CAMERA_HEIGHT / 2 + row * HUD_LINE;
-          renderText(label, mx, y, ALIGN_LEFT, HUD_SCALE);
-          renderText('' + value, mx + lw, y, ALIGN_LEFT, HUD_SCALE);
-        };
-        line('Shaft:', Math.round(tunnel / PX_PER_M) + 'm', 1);
-        line('Dust:', dust, 2);
-        line('Score:', score, 3);
-      }
-      if (endReady) renderText(isMobile ? 'Tap to play again' : 'Press any key to play again', CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + 5 * HUD_LINE, ALIGN_CENTER, HUD_SCALE);
+      renderText('Score: ' + score, CAMERA_WIDTH / 2, CAMERA_HEIGHT / 2 + HUD_LINE, ALIGN_CENTER, HUD_SCALE);
+      endMenuLayout().forEach((item, i) => {
+        if (i === endIndex) renderText('>', item.chevronX, item.textY, ALIGN_LEFT, TITLE_MENU_SCALE);
+        renderText(item.label, item.labelX, item.textY, ALIGN_LEFT, TITLE_MENU_SCALE);
+      });
       // renderText(monetizationEarned(), TEXT.width - CHARSET_SIZE, TEXT.height - 2*CHARSET_SIZE, ALIGN_RIGHT);
       break;
     case HIGHSCORE_SCREEN:
@@ -1690,12 +1789,16 @@ function render() {
         HS_HEADERS.forEach((h, c) => renderText(h, colX[c], top, ALIGN_LEFT, HS_SCALE));
         rows.forEach((r, i) => {
           if (i === highscoreIndex) renderText('>', r.chevronX, r.y0, ALIGN_LEFT, HS_SCALE);
-          renderText(r.seed, colX[0], r.y0, ALIGN_LEFT, HS_SCALE);
-          renderText('' + r.score, colX[1], r.y0, ALIGN_LEFT, HS_SCALE);
-          renderText(r.date, colX[2], r.y0, ALIGN_LEFT, HS_SCALE);
+          // the appended Back row (see highscoreLayout) is a plain label
+          // spanning the row, not seed/score/date columns.
+          if (r.back) renderText(r.label, colX[0], r.y0, ALIGN_LEFT, HS_SCALE);
+          else {
+            renderText(r.seed, colX[0], r.y0, ALIGN_LEFT, HS_SCALE);
+            renderText('' + r.score, colX[1], r.y0, ALIGN_LEFT, HS_SCALE);
+            renderText(r.date, colX[2], r.y0, ALIGN_LEFT, HS_SCALE);
+          }
         });
       }
-      if (highscoreReady) renderText(isMobile ? 'Tap to return' : 'Press any key to return', CAMERA_WIDTH / 2, CAMERA_HEIGHT - HUD_LINE - CHARSET_SIZE * HUD_SCALE, ALIGN_CENTER, HUD_SCALE);
       break;
   }
 

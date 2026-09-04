@@ -415,3 +415,34 @@ Roughly in build order, oldest first.
       talking about are visible behind the menu. Also dropped the boilerplate
       Konami-code easter egg (game.js + the README mention) — unused, not
       part of this game. See DESIGN.md "Premise" and "Screens".
+
+- [x] End-screen menu + seed sharing UI. END_SCREEN now shows a chevron menu
+      (**Try again** / **Share your score** / **Back to main menu**, same
+      Up/Down/Enter/tap interaction and release-then-press arming as the
+      title menu — `endArmed`/`endIndex`/`endMenuItems`/`endMenuLayout`,
+      replacing the old freshPress-restart `endReady`/`endHeld`) under a
+      centred `Score:` line; the `Speed:`/`Shaft:`/`Dust:` HUD keeps running
+      top-left the same as GAME_SCREEN (factored into a shared `renderHud()`),
+      speed pinned to 0m/s since the run is over (`endGame()` zeroes
+      `hero.momentum`). **Share your score** (`shareScore()`) closes out the
+      seed-sharing TODO: hands `share.js` a title/text/url payload (the run's
+      shaft length + dust, and a URL carrying the resolved seed) plus, where
+      `navigator.canShare({files})` allows it, a PNG snapshot of the current
+      frame. **Back to main menu** (`goTitle()`) drops back to TITLE_SCREEN
+      with the world actually reset — DUG/FILLED cleared, a fresh hero
+      (`newHero()`, also now shared with `startGame()`), reseated, repainted,
+      `titleJumpT`/`titleJumping` rewound to 0 — so the backdrop shows undug
+      ground and the unicorn at its resting title pose instead of the just-
+      finished run's tunnel with the drill sitting wherever it stalled or
+      surfaced.
+
+      HIGHSCORE_SCREEN got the same "Back to main menu" wording, and it's now
+      an appended row of the score list itself (`highscoreLayout()`) rather
+      than a separate hint line — Down off the last score lands on it, Down
+      again wraps to the first score, same as any chevron menu; the old
+      "press any key / tap elsewhere returns to title" catch-alls are gone.
+
+      Esc is now a shortcut back to TITLE from both END_SCREEN and
+      HIGHSCORE_SCREEN. The title menu's Music item dropped its `[M]` prefix
+      (`Music: N%`) — M still cycles it, just undocumented in the label, the
+      only menu item that had been calling out its own shortcut.
