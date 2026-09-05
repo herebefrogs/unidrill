@@ -5,28 +5,14 @@ for the reasoning behind each of these; this is just the sequencing.
 Completed items are moved to `CHANGELOG.md` (an archive, not read on startup)
 as they land — this list stays scoped to open work.
 
-- [ ] Draw Iris and animate her on the title and end screens. The title-
-      screen framing (name, copy, speech bubble) has landed — see CHANGELOG,
-      "Errands of Iris title screen" — but Iris herself is still only implied
-      by that text bubble, not drawn. Needs her own small canvas sprite (same
-      spirit as the player unicorn), then:
-      - Title screen: place her somewhere in the scene the bubble is coming
-        from (next to it, or she's the one "saying" it).
-      - End screen: after the sky rainbow finishes drawing itself in, Iris
-        walks it — on at the near foot, over the apex, off toward her
-        destination. How far she gets / how sprightly she looks scales with
-        the rainbow size (i.e. dust collected): a big haul carries her clean
-        over, a thin arc leaves her trudging. Zero dust → no rainbow, she
-        just waits at the tunnel mouth (what `dry run!` reacts to). Gets the
-        grander arc on the double-rainbow resurface.
-      - The end headline becomes Iris's reaction to the rainbow, not a
-        neutral status — warm line scaled to the haul at the top, `dry run!`
-        at zero. (`well dug!` / `dry run!` are the current placeholders.)
-      Player is still the unicorn drill; Iris is only ever an NPC. When this
-      lands, sync DESIGN.md — Run end / score headline, and a new end-screen
-      "Iris crossing" beat.
-      Other names considered and dropped for the title: Gusher, Bloomshaft,
-      "Colours Shall Rise", Bloomwright, Arcus, "Seven Below".
+- [ ] End headline becomes Iris's reaction to the rainbow, not a neutral
+      status — warm line scaled to the haul at the top, `dry run!` at zero
+      still works as-is. Iris herself is drawn and animated now (walks to
+      the rainbow's near foot, rides it out — see CHANGELOG, "Draw Iris and
+      animate her on the title and end screens"); this is just the headline
+      text, currently the placeholder `well dug!`/`dry run!`/`double
+      rainbow!` trio. When this lands, sync DESIGN.md's Run end / score
+      section.
 
 ## Bugs
 

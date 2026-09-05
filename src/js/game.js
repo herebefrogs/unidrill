@@ -11,6 +11,7 @@ import { ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, CHARSET_SIZE, renderText, render
 import { clamp, setRandSeed, loadImg, lerp } from './utils';
 import { CELL_SIZE, CLAY, sampleMaterial, materialColor, MATERIAL_DRAG, sampleDust, DUST_NONE, DUST_DENSE, setMapSeed } from './terrain';
 import TILESET from '../img/tileset.webp';
+import SPRITES from '../img/sprites.webp';
 
 
 
@@ -436,6 +437,7 @@ function renderHud() {
 const ATLAS = {};
 const FRAME_DURATION = 0.1; // duration of 1 animation frame, in seconds
 let tileset;   // characters sprite, embedded as a base64 encoded dataurl by build script
+let sprites;   // 2 frames, 28x28 each: unicorn (unused so far - see TODO), Iris (title screen only)
 
 // LOOP VARIABLES
 
@@ -516,6 +518,9 @@ function startGame() {
   FILLED.clear();
   hero = newHero();
   seatSpawn();                       // mapOffsetX + camera onto the clay-free spawn column
+  irisWalkT = irisRideT = irisArc = undefined;   // cancel any end-of-run walk/ride still in flight - Retry skips TITLE_SCREEN, so its per-frame seatIris() won't run to reset her
+  irisGroundOffset = 0;
+  seatIris(titleBubbleLayout().textX);
   heroWentDeep = false;
   outcome = undefined;
   depth = 0;
@@ -769,7 +774,7 @@ function titleMenuLayout() {
   });
 }
 
-// Title-screen unicorn: rests offset left of hero's true buffer position
+// Title-screen unicorn: rests offset right of hero's true buffer position
 // (hero.x/y stay authoritative for the camera/terrain the whole time - see
 // drawHero's offsetX/Y params - so a resize mid-hop just re-seats the real
 // spawn under her and the cosmetic offset keeps ticking) until Start fires,
@@ -796,12 +801,18 @@ function titleJumpPose() {
   const t = easeTitleJump(titleJumpT);
   const theta = Math.PI * (1 - t);
   return {
-    x: TITLE_JUMP_RX * Math.cos(theta) - TITLE_JUMP_RX,
+    // rests to the right of the true spawn (opposite side from Iris/her
+    // bubble - see titleBubbleLayout) and hops left into position.
+    x: TITLE_JUMP_RX - TITLE_JUMP_RX * Math.cos(theta),
     y: -TITLE_JUMP_RY * Math.sin(theta),
-    // 0 (facing right, standing on the surface) at rest -> PI/2 (drilling
-    // pose) on landing, matching the fresh hero startGame() builds - lands
-    // already pointed the way GAME_SCREEN expects, no snap on the handoff frame.
-    angle: t * Math.PI / 2,
+    // 0 (facing left, standing on the surface - toward Iris/her bubble and
+    // the direction of the hop, since this is drawn with drawHeroIdle's
+    // mirrored geometry) at rest -> -PI/2 (drilling pose, mirrored) on
+    // landing - a pixel-for-pixel match to the fresh hero startGame() builds
+    // at its initial PI/2 (that's drawHero, Y-mirrored the other way): the
+    // two mirrors agree at exactly the PI/2 gap between these angles, so the
+    // handoff frame is truly continuous, not just "both point down".
+    angle: -t * Math.PI / 2,
   };
 }
 
@@ -969,11 +980,11 @@ function endMenuLayout() {
   });
 }
 
-// Iris's title-screen-only speech bubble: a plain white rounded rect (comic-
-// book caption style, no tail) in the sky - below the title, above the
-// surface line (titleMenuLayout's lowerHalfTop) - centred in that band and
-// nudged right of the screen's horizontal centre. Doesn't have to line up
-// exactly with the unicorn/Iris art that lands later.
+// Iris's title-screen-only speech bubble: a white rounded rect with a tail
+// (renderBubble) pointing down at her, in the sky - below the title, above
+// the surface line (titleMenuLayout's lowerHalfTop) - centred in that band
+// and nudged left of the screen's horizontal centre (opposite side from the
+// unicorn's title-hop rest position - see titleJumpPose).
 const BUBBLE_SCALE = 2;
 const BUBBLE_LINE = BUBBLE_SCALE * CHARSET_SIZE + 6;
 const BUBBLE_PAD = 14;
@@ -993,13 +1004,84 @@ function titleBubbleLayout() {
   const textW = Math.max(...BUBBLE_LINES.map(line => textWidth(line, BUBBLE_SCALE)));
   const textH = BUBBLE_LINES.length * BUBBLE_LINE;
   const w = textW + BUBBLE_PAD * 2, h = textH + BUBBLE_PAD * 2;
-  const cx = CAMERA_WIDTH / 2 + CAMERA_WIDTH * 0.15, cy = (titleBottom + surfaceLine) / 2;
+  const cx = CAMERA_WIDTH / 2 - CAMERA_WIDTH * 0.15, cy = (titleBottom + surfaceLine) / 2;
   // clamped, not just nudged - on a narrow viewport the unclamped centring
-  // can push the box past the right edge (a long line + a % width nudge both
+  // can push the box past the left edge (a long line + a % width nudge both
   // grow the overflow together); textX re-centres on the clamped box, not
   // the original cx, so the text never drifts off-centre inside it.
   const x = clamp(cx - w / 2, BUBBLE_MARGIN, CAMERA_WIDTH - BUBBLE_MARGIN - w);
   return { x, y: cy - h / 2, w, h, textX: x + w / 2 };
+}
+
+// Iris herself - a static 28x28 sprite (right frame of sprites.webp; the left
+// frame is the player unicorn, not used here - the title/end-screen unicorn
+// stays the animated vector drawHero()). Feet on the surface line, centred
+// under the bubble's text column so it reads as her speaking it.
+//
+// She has to survive the TITLE_SCREEN -> GAME_SCREEN handoff standing exactly
+// where she was (this is where the player left her, watching from the
+// surface) even though the camera stops being hard-locked to the hero and
+// mapOffsetX/mapOffset start paging as the player digs. So she's pinned in
+// world space, not screen space: irisWorldX is (re)computed from the title
+// bubble's screen-space layout every TITLE_SCREEN frame (cheap, and picks up
+// a live resize for free) via the same buffer/world conversions dig() and
+// spawnDustParticle() use, then just held there once GAME_SCREEN takes over
+// and stops updating it.
+let irisWorldX;
+let irisGroundOffset = 0;   // buffer-space px, <=0 - lifts her off the ground line while riding the rainbow's arc (see updateIrisRide); 0 whenever she's just standing/walking
+const SPRITE_SIZE = 28;
+const IRIS_SPRITE_X = 28;
+const IRIS_SCALE = 2;
+function seatIris(bubbleTextX) {
+  irisWorldX = cameraX + bubbleTextX + mapOffsetX;   // screen -> buffer (+cameraX) -> world (+mapOffsetX)
+}
+function drawIris() {
+  const w = SPRITE_SIZE * IRIS_SCALE, h = SPRITE_SIZE * IRIS_SCALE;
+  BUFFER_CTX.drawImage(sprites, IRIS_SPRITE_X, 0, SPRITE_SIZE, SPRITE_SIZE, irisWorldX - mapOffsetX - w / 2, SURFACE_Y - mapOffset - h + irisGroundOffset, w, h);
+}
+
+// end-of-run sequence, two phases chained end to end: (1) walk from wherever
+// GAME_SCREEN left Iris to the rainbow's left foot (see endGame/
+// rainbowRideArc), (2) ride that same bow's outer edge all the way to its far
+// foot (updateIrisRide). Both are lerps on live state, never a teleport,
+// since she can still be on screen when phase 1 kicks off (esp. a resurface,
+// where the rewind camera starts right next to her). *T undefined = that
+// phase isn't running; drawIris() and everything else just reads whatever
+// updateIrisWalk/updateIrisRide last left in irisWorldX/irisGroundOffset.
+let irisFromX, irisToX, irisWalkT, irisArc, irisRideT;
+const IRIS_WALK_DURATION = REWIND_DURATION * 1.6;   // longer than the rewind so she's still mid-walk when it lands, not stalled early
+const IRIS_RIDE_SPEED = 700;                        // px/s along the arc - duration derives from arc size (see endGame) so a huge single bow doesn't zip her across in the same time as a modest double
+function walkIrisTo(x) {
+  irisFromX = irisWorldX;
+  irisToX = x;
+  irisWalkT = 0;
+}
+function updateIrisWalk() {
+  if (irisWalkT === undefined) return;
+  irisWalkT += elapsedTime;
+  if (irisWalkT >= IRIS_WALK_DURATION) {
+    irisWorldX = irisToX;
+    irisWalkT = undefined;
+    if (irisArc) irisRideT = 0;   // hand off to phase 2 - see updateIrisRide
+    return;
+  }
+  irisWorldX = lerp(irisFromX, irisToX, irisWalkT / IRIS_WALK_DURATION);
+}
+
+// phase 2: ride the bow's outer edge (irisArc - see rainbowRideArc) from its
+// left/near foot (theta PI, where updateIrisWalk left her) to its right/far
+// foot (theta 2*PI), at the same fixed radius the rainbow is actually drawn
+// at, so she visibly rides the curve rather than cutting a straight line
+// under it. irisGroundOffset (r*sin(theta), <=0) lifts her off the ground on
+// the way up and sets her back down at the far foot.
+function updateIrisRide() {
+  if (irisRideT === undefined) return;
+  irisRideT += elapsedTime;
+  const t = clamp(irisRideT / irisArc.duration, 0, 1);
+  const theta = Math.PI + t * Math.PI;
+  irisWorldX = irisArc.cx + irisArc.r * Math.cos(theta);
+  irisGroundOffset = irisArc.r * Math.sin(theta);
+  if (t >= 1) { irisRideT = irisArc = undefined; irisGroundOffset = 0; }
 }
 
 function processInputs() {
@@ -1148,6 +1230,11 @@ function update() {
   // outside the screen guards: particles in flight when the run ends still
   // finish flying through the rewind and onto END_SCREEN instead of freezing.
   updateParticles();
+  // same reasoning: Iris's end-of-run walk + rainbow ride (see walkIrisTo/
+  // updateIrisRide) outlive the REWIND_SCREEN they started on and finish on
+  // END_SCREEN.
+  updateIrisWalk();
+  updateIrisRide();
 
   // swap the track when the screen has changed to one on the other side of the
   // GAME/END music split (cheap no-op otherwise; covers every screen path,
@@ -1305,6 +1392,14 @@ function endGame(resurfaced) {
     const egressX = trail[trail.length - 2];
     const sep = Math.abs(egressX - trail[0]);
     if (sep > CAMERA_WIDTH * RAINBOW_DOUBLE_MIN && sep < CAMERA_WIDTH * RAINBOW_DOUBLE_MAX) rainbowX2 = egressX;
+  }
+  // Iris rides the rainbow: walk her to its left foot, connecting with no gap,
+  // then ride its outer edge all the way to the far foot (see
+  // rainbowRideArc/walkIrisTo/updateIrisRide). No rainbow, no ride - a dry
+  // run (dust===0, caught above) leaves her wherever GAME_SCREEN left her.
+  if (dust) {
+    irisArc = rainbowRideArc();
+    walkIrisTo(irisArc.leftX - SPRITE_SIZE * IRIS_SCALE / 2);
   }
   rewound = true;
   let pathLen = 0;
@@ -1742,13 +1837,15 @@ function render() {
       renderDust();   // the underground dust patches near the spawn column - what Iris's bubble is asking for
       {
         const pose = titleJumpPose();
-        drawHero(pose.x, pose.y, pose.angle);
+        drawHeroIdle(pose.x, pose.y, pose.angle);
       }
       // pinned near the top (not vertically centred) to leave the surface -
       // where the unicorn/Iris/speech-bubble framing will sit - clear below
       renderText('Errands of Iris', CAMERA_WIDTH / 2, HUD_LINE, ALIGN_CENTER, HUD_SCALE * 2);
       {
         const bubble = titleBubbleLayout();
+        seatIris(bubble.textX);
+        drawIris();
         renderBubble(bubble.x, bubble.y, bubble.w, bubble.h, BUBBLE_RADIUS);
         BUBBLE_LINES.forEach((line, i) => {
           renderText(line, bubble.textX, bubble.y + BUBBLE_PAD + i * BUBBLE_LINE, ALIGN_CENTER, BUBBLE_SCALE, '#000');
@@ -1768,6 +1865,7 @@ function render() {
       clearBuffer();
       renderDust();
       renderParticles();
+      drawIris();   // stays behind at the surface, watching from where the title screen left her
       drawHero();
       renderHud();
       break;
@@ -1776,6 +1874,7 @@ function render() {
       clearBuffer();
       renderDust();
       renderParticles();
+      drawIris();   // her end-of-run walk (walkIrisTo) may already be under way and on screen here
       break;
     case END_SCREEN:
       // hold the world where the rewind left it (surface + tunnel mouth, or
@@ -1787,6 +1886,7 @@ function render() {
       else renderRainbow(rainbowX);
       renderDust();
       renderParticles();
+      drawIris();   // walking to (or already at) the rainbow's left foot - see walkIrisTo in endGame(); left untouched on a dry run
       if (!rewound) drawHero();
       // same corner readout as GAME_SCREEN - just frozen on the run's final
       // numbers (see renderHud) - so the centre of the screen is free for the
@@ -1812,7 +1912,7 @@ function render() {
       renderDust();
       {
         const pose = titleJumpPose();
-        drawHero(pose.x, pose.y, pose.angle);
+        drawHeroIdle(pose.x, pose.y, pose.angle);
       }
       renderText('Highscores', CAMERA_WIDTH / 2, HUD_LINE, ALIGN_CENTER, HUD_SCALE * 2);
       {
@@ -1959,6 +2059,44 @@ function rainbowSweep() {
   return (1 - (1 - clamp(rainbowT / RAINBOW_GROW, 0, 1)) ** 2) * Math.PI;
 };
 
+// world-space centre/radius of whichever bow Iris rides at the end of a run
+// (see endGame/updateIrisRide), plus its two foot x's (leftX/rightX - always
+// cx-r/cx+r, since r is a plain positive radius) and how long the ride should
+// take at a constant edge speed. Single bow: its one (only) arc, anchored at
+// the ingress hole (rainbowX) - same cx/r renderRainbow itself draws at.
+// Double bow: the OUTER bow, UNLESS the egress hole is right of the ingress
+// hole - there, the outer bow's own grow sweep runs right-to-left (fromRight
+// - see renderDoubleRainbow) while the ride always runs left-to-right
+// (updateIrisRide, foot to foot), so she'd set off riding paint that hasn't
+// been laid yet. The INNER bow always grows left-to-right regardless of
+// which hole is on which side, so that case rides the inner bow instead
+// (narrower, but always in sync with its own growth). cx/r mirror
+// renderDoubleRainbow's geometry exactly so the ride traces what's actually
+// drawn.
+function rainbowRideArc() {
+  const k = dust / (dust + RAINBOW_DUST_HALF);
+  const foot = lerp(RAINBOW_FOOT_MIN, RAINBOW_FOOT_MAX, k);
+  let cx, r;
+  if (rainbowX2 === undefined) {
+    r = lerp(RAINBOW_R_MIN, RAINBOW_R_MAX, k);
+    cx = rainbowX + r - foot / 2;
+  } else {
+    const half = Math.abs(rainbowX2 - rainbowX) / 2;
+    const dir = rainbowX2 < rainbowX ? 1 : -1;   // from the egress hole toward the arch centre - see renderDoubleRainbow
+    const rO = half * (1 + RAINBOW_DOUBLE_OVERSHOOT);
+    const rI = half * (1 - RAINBOW_DOUBLE_OVERSHOOT);
+    if (rainbowX2 > rainbowX) {
+      const fs = Math.min(foot, rI * 0.5) * 0.55;
+      r = rI + fs / 2;
+      cx = rainbowX - dir * rI;
+    } else {
+      r = rO + Math.min(foot, rI * 0.5) / 2;
+      cx = rainbowX2 + dir * rO;
+    }
+  }
+  return { cx, r, leftX: cx - r, rightX: cx + r, duration: clamp(Math.PI * r / IRIS_RIDE_SPEED, 1.5, 6) };
+}
+
 // normal single arch: left foot straddling footX, radius scaling with dust
 // collected (saturating k) - dust is the whole point, so a dustless run
 // sprouts nothing (see the 'dry run!' headline). Centre sits one mid-radius
@@ -2036,6 +2174,20 @@ function renderParticles() {
 // title screen's resting/hopping unicorn is the only caller that overrides
 // them (see titleJumpPose()); every other call site draws hero exactly where
 // it is.
+//
+// Built with every local y negated (legs/tail/body/head/horn all on the
+// mirror-image side of the x-axis) so the horn stays on local +x - hero.angle
+// is the real drill heading (velX=cos, velY=sin off it - see moveHero/the
+// dig-probe), so that axis can't move without dragging the physics with it.
+// This is what makes drawHeroIdle's mirrored pose (see below) land pixel-
+// identical to this one at the TITLE->GAME handoff (both put the head block/
+// legs/tail at the same spot at their respective PI/2 vs -PI/2) without any
+// offset math - a Y-mirror and an X-mirror agree at exactly the angles PI/2
+// apart that this handoff needs. The trade: moving right now swings the legs
+// up instead of down (and left, down instead of up) - reversed from before,
+// but no more or less "correct" than the old, arbitrary pick; the figure was
+// always going to corkscrew through some headings (see above), this just
+// moves which ones.
 function drawHero(offsetX = 0, offsetY = 0, angle = hero.angle) {
   const ctx = BUFFER_CTX;
   ctx.save();
@@ -2049,27 +2201,70 @@ function drawHero(offsetX = 0, offsetY = 0, angle = hero.angle) {
   const legX = [-9, -5, 2, 6];
   for (let i = 0; i < 4; i++) {
     ctx.save();
+    ctx.translate(legX[i], -4);
+    ctx.rotate(Math.sin(hero.legPhase + i * Math.PI / 2) * 0.5);
+    ctx.fillRect(-1.5, -7, 3, 7);
+    ctx.restore();
+  }
+
+  // tail - purple stub off the back, sits in the already-carved tunnel
+  ctx.fillStyle = UNICORN_ACCENT;
+  ctx.fillRect(-18, 0, 7, 5);
+
+  // body + head - white blocks
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(-12, -6, 20, 11);
+  ctx.fillRect(5, -3, 11, 11);
+
+  // horn / drill - purple triangle off the forehead, biting the ground ahead
+  ctx.fillStyle = UNICORN_ACCENT;
+  ctx.beginPath();
+  ctx.moveTo(14, 8);
+  ctx.lineTo(14, 1);
+  ctx.lineTo(25, 3.5);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+// same figure, built mirrored the OTHER way (every local x negated instead of
+// y - tail/legs/body/head/horn) so it faces LEFT at angle=0 instead of right.
+// Used solely by the TITLE_SCREEN/HIGHSCORE_SCREEN idle pose (see
+// titleJumpPose) - live gameplay always uses drawHero, whose Y-mirror keeps
+// the horn on hero.angle's true heading axis (see its comment); this pose
+// never moves under real physics, so it's free to mirror the other axis and
+// face left outright instead. The two mirrors agree at PI/2 apart, which is
+// exactly the gap between this pose's landing angle and drawHero's initial
+// drilling angle - see drawHero's comment for why that lines up.
+function drawHeroIdle(offsetX = 0, offsetY = 0, angle = hero.angle) {
+  const ctx = BUFFER_CTX;
+  ctx.save();
+  ctx.translate(hero.x + hero.w / 2 + offsetX, hero.y + hero.h / 2 + offsetY);
+  ctx.rotate(angle);
+  ctx.scale(1.35, 1.35);
+
+  ctx.fillStyle = '#fff';
+  const legX = [9, 5, -2, -6];
+  for (let i = 0; i < 4; i++) {
+    ctx.save();
     ctx.translate(legX[i], 4);
     ctx.rotate(Math.sin(hero.legPhase + i * Math.PI / 2) * 0.5);
     ctx.fillRect(-1.5, 0, 3, 7);
     ctx.restore();
   }
 
-  // tail - purple stub off the back, sits in the already-carved tunnel
   ctx.fillStyle = UNICORN_ACCENT;
-  ctx.fillRect(-18, -5, 7, 5);
+  ctx.fillRect(11, -5, 7, 5);
 
-  // body + head - white blocks
   ctx.fillStyle = '#fff';
-  ctx.fillRect(-12, -5, 20, 11);
-  ctx.fillRect(5, -8, 11, 11);
+  ctx.fillRect(-8, -5, 20, 11);
+  ctx.fillRect(-16, -8, 11, 11);
 
-  // horn / drill - purple triangle off the forehead, biting the ground ahead
   ctx.fillStyle = UNICORN_ACCENT;
   ctx.beginPath();
-  ctx.moveTo(14, -8);
-  ctx.lineTo(14, -1);
-  ctx.lineTo(25, -3.5);
+  ctx.moveTo(-14, -8);
+  ctx.lineTo(-14, -1);
+  ctx.lineTo(-25, -3.5);
   ctx.fill();
 
   ctx.restore();
@@ -2234,7 +2429,7 @@ onload = async (e) => {
   seatSpawn();   // seat the title backdrop on the frame startGame() will open on
   //checkMonetization();
 
-  tileset = await loadImg(TILESET);
+  [tileset, sprites] = await Promise.all([loadImg(TILESET), loadImg(SPRITES)]);
   // speak = await initSpeech();
   renderMap();
 

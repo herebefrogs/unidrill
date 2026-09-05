@@ -86,10 +86,18 @@ export function textWidth(msg, scale = 1) {
   return ctx.measureText('' + msg).width;
 }
 
-/** Filled white rounded rect (e.g. a comic-style caption/speech-bubble backing), same buffer/space as renderText. */
+const BUBBLE_TAIL_W = 16;   // base width of the pointer triangle
+const BUBBLE_TAIL_H = 10;   // how far it drops below the box
+
+/** Filled white rounded rect with a small downward tail centred on its bottom edge (pointing at whoever's speaking), same buffer/space as renderText. */
 export function renderBubble(x, y, w, h, r) {
   ctx.fillStyle = '#fff';
   ctx.beginPath();
   ctx.roundRect(x, y, w, h, r);
+  const cx = x + w / 2;
+  ctx.moveTo(cx - BUBBLE_TAIL_W / 2, y + h);
+  ctx.lineTo(cx + BUBBLE_TAIL_W / 2, y + h);
+  ctx.lineTo(cx, y + h + BUBBLE_TAIL_H);
+  ctx.closePath();
   ctx.fill();
 }

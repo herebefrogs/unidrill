@@ -19,8 +19,12 @@ can only travel by one. Nobody in-game needs the myth spelled out; it's
 carried by a title-screen beat: a speech bubble reads "I have a message to
 deliver. Collect dust to grow a rainbow bridge." over a backdrop showing the
 dust patches she means. The player is still the unicorn drill; Iris is only
-ever an NPC. A matching end-screen beat — Iris walking the finished rainbow,
-scaled to the haul — needs her own sprite and is still open (see TODO.md).
+ever an NPC. She's drawn from `src/img/sprites.webp` (`drawIris()`) and stands
+by her bubble on TITLE/HIGHSCORE, then keeps her spot on GAME/REWIND. On
+END_SCREEN — dust permitting — she walks to the near foot of whichever
+rainbow she'll ride (see "Iris crossing" below) and rides it out. The end
+headline itself is still the neutral `Well dug!`/`Dry run!`/`Double
+rainbow!` placeholder, not yet Iris's own reaction line (open, see TODO.md).
 
 ## Core loop
 
@@ -125,6 +129,21 @@ don't read as a span, too far and the second hole won't frame up even
 recentred. `renderDoubleRainbow(egressX, ingressX)` — both bows via
 `arcBands`, whose `fromRight` flag picks the growth direction; `rainbowX` is
 the ingress, `rainbowX2` the egress (set only for a double, else `undefined`).
+
+**Iris crossing.** On a run that collected dust, Iris walks to the near foot
+of whichever rainbow the score grew and rides it out — on a dry run she stays
+put at the tunnel mouth (what `dry run!` reacts to). Which bow: the single
+arch's left (ingress) foot; on a double, the **inner** bow (ingress-anchored,
+sweeps left→right) always, even when the outer bow's near foot is
+geometrically further left — the outer bow sweeps right→left, so riding it
+would have her set off before it's finished drawing itself in.
+`rainbowRideArc()` derives the exact `{cx, r}` of that bow's on-screen arc
+(matching `renderRainbow`/`renderDoubleRainbow`'s own geometry) so she
+traces the visible curve, not an approximation. Two-phase motion: `walkIrisTo`
+lerps her to the foot over `IRIS_WALK_DURATION`, then `updateIrisRide` arcs
+her `cx + r·cos(θ)`/`r·sin(θ)` from the near foot to the far one. Both survive
+the REWIND→END_SCREEN handoff and reset on Retry (`startGame()` reseats her
+at her title-screen spot).
 
 **Camera rewind.** However the run ends, the camera retraces the drilled path
 back to the ingress mouth before the score appears — a short cutscene that

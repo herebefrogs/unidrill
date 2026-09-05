@@ -275,6 +275,52 @@ Roughly in build order, oldest first.
       TERRAIN-DUST` corner label on TITLE keeps the seed visible even in
       js13kgames' iframe embed, which hides the URL bar.
 
+- [x] Draw Iris and animate her on the title and end screens. Own sprite in
+      `src/img/sprites.webp`, drawn by `drawIris()` — stands by her speech
+      bubble on TITLE/HIGHSCORE, holds that spot through GAME/REWIND, then on
+      END_SCREEN (dust permitting) walks to the near foot of whichever
+      rainbow the run earned and rides it out to the far foot. Zero dust
+      leaves her waiting at the tunnel mouth (`dry run!`).
+      - Which foot: the ingress point always — the single arch's left foot,
+        or on a double rainbow the **inner** bow's foot (ingress-anchored,
+        sweeps left→right), even when the outer bow's foot sits further
+        left; the outer bow sweeps right→left, so riding it would launch her
+        before it finished drawing in.
+      - `rainbowRideArc()` derives the exact `{cx, r}` of whichever bow she
+        rides straight from `renderRainbow`/`renderDoubleRainbow`'s own
+        geometry (foot width from dust via the same saturating curve; radius
+        from dust for a single arch, from the hole span for a double), so
+        she traces the visible curve rather than an approximation.
+      - Two-phase motion: `walkIrisTo`/`updateIrisWalk` lerps `irisWorldX` to
+        the foot over `IRIS_WALK_DURATION` (`REWIND_DURATION * 1.6`), handing
+        off to `updateIrisRide`, which arcs her along `cx + r·cos(θ)` /
+        `r·sin(θ)` (θ: π→2π) over a duration derived from arc length
+        (`IRIS_RIDE_SPEED`). Both update unconditionally each frame (like
+        `updateParticles()`) so the sequence survives the REWIND→END_SCREEN
+        handoff; `startGame()` resets both phases and reseats her at her
+        title spot on Retry.
+      - The end headline is still the neutral `Well dug!`/`Dry run!`/`Double
+        rainbow!` placeholder, not yet Iris's own reaction line — that piece
+        of the original TODO item is still open, see TODO.md.
+      - Along the way, rebuilt the unicorn's geometry so its facing is
+        consistent surface-to-tunnel: `drawHeroIdle()` (new; TITLE/HIGHSCORE
+        idle-hop pose only) mirrors `drawHero()`'s shape across the local
+        x-axis (every local x negated) so it faces left at rest; live
+        gameplay's `drawHero()` itself got mirrored across the local
+        **y**-axis instead (every local y negated, `legX`/heading axis
+        untouched) so `hero.angle`'s role as the true heading
+        (`velX=cos`, `velY=sin`, the dig-probe) stays intact at every angle.
+        The payoff: a Y-mirror and an X-mirror render pixel-identical at
+        angles exactly π/2 apart — precisely the gap between the title hop's
+        landing angle (`-PI/2`) and a fresh hero's initial drilling angle
+        (`PI/2`) — so the TITLE→GAME handoff is a true pixel match, not just
+        "both point down". Traded off: moving right now swings the legs up
+        instead of down (and left, down instead of up) — reversed from
+        before, but no more or less arbitrary than the old pick. An earlier
+        attempt added a runtime `flip` scale parameter to `drawHero()`
+        instead of a real geometry rebuild — worked visually but rejected
+        for the extra runtime op; superseded by the two-function split above.
+
 ## Playtest / gameplay balancing
 
 - [x] Steering model — absolute direction vs. bank. RESOLVED: playtesters
