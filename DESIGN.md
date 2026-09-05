@@ -17,7 +17,7 @@ the surface and a new rainbow spawns.
 of the gods, who travels *along* the rainbow — has a message to deliver and
 can only travel by one. Nobody in-game needs the myth spelled out; it's
 carried by a title-screen beat: a speech bubble reads "I have a message to
-deliver. Collect dust to grow a rainbow bridge." over a backdrop showing the
+deliver. Collect dust to grow a rainbow bridge for me." over a backdrop showing the
 dust patches she means. The player is still the unicorn drill; Iris is only
 ever an NPC. She's drawn from `src/img/sprites.webp` (`drawIris()`) and stands
 by her bubble on TITLE/HIGHSCORE, then keeps her spot on GAME/REWIND. On
@@ -218,7 +218,8 @@ Speed, shaft length, dust collected (HUD labels `Speed:` / `Shaft:` /
 Speed and shaft length are converted from the pixel-space sim values to
 metric for display only (`PX_PER_M` = 32 px/m → `speed` in m/s, `shaft` in
 m, no decimal — the accumulator hits four digits routinely); the sim itself
-never leaves pixels. `depth` is still tracked (it gates the resurface end)
+never leaves pixels. Dust is shown in grams (`42g`) — the raw dust-cell
+tally, no conversion, just a metric-flavoured unit suffix. `depth` is still tracked (it gates the resurface end)
 but no longer shown. The speed *value* (the number only, not the `speed:`
 label — drawn separately, centred on itself) swells up to 2x while momentum
 is in the overspeed band, scaled by how far between `MOMENTUM.max` and
@@ -426,11 +427,12 @@ that's guaranteed to happen (see Music & sound).
 
 `TITLE` shows "Errands of Iris", Iris's speech bubble (see Premise) over the
 dust-patched backdrop, the resting unicorn (offset left of its real spawn
-point — see below), a small `Seed: XXXXXXXX` corner label (js13kgames runs
-entries in an iframe, hiding the URL bar and the seed with it), and a menu:
-**Start**, **Music: N%**, **Highscores**, **New seed**. Up/Down move the
-selection (a `>` chevron in its own column so labels never shift), Enter
-triggers it; each row also has a tap-friendly hit box for mobile. Selecting
+point — see below), and a menu: **Start**, **Music: N%**, **Highscores**,
+**New seed**, followed by a non-selectable `Seed: XXXXXXXX` line in the same
+alignment/size as the rows above it (js13kgames runs entries in an iframe,
+hiding the URL bar and the seed with it). Up/Down move the selection (a `>`
+chevron in its own column so labels never shift), Enter triggers it; each
+row also has a tap-friendly hit box for mobile. Selecting
 Start hops the resting unicorn along a semicircular arc into its real
 game-start pose (`titleJumpT`/`titleJumpPose`, eased) before handing off to
 `GAME_SCREEN` — the "jump in" is deliberate, distinguishing a fresh run from
@@ -515,7 +517,7 @@ table's eviction cap (see Highscores below).
 
 **Sharing.** END_SCREEN's **Share your score** menu item (`shareScore()`)
 hands `share.js` a payload built from the run just finished: title, a text
-line ("I dug a *N* meter long shaft and collected *M* rainbow dust in
+line ("I dug a *N* meter long shaft and collected *M*g of rainbow dust in
 Errands of Iris..."), and a `url` carrying the run's resolved seed — so the
 link a friend opens drops them onto the same terrain/dust pair. Where the
 platform supports the Web Share API's `files` array (checked via

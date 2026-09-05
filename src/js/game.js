@@ -427,7 +427,7 @@ function renderHud() {
   renderText('Dust:', HUD_X, DUST_COUNTER_Y, ALIGN_LEFT, HUD_SCALE);
   // the value briefly swells to 2x and back on each tally (see dustPop); grow about the number's own centre so it pops in place
   {
-    const str = '' + dust;
+    const str = dust + 'g';
     const s = HUD_SCALE * (1 + Math.sin(clamp((gameTime - dustPop) / DUST_POP_DURATION, 0, 1) * Math.PI));
     const cx = DUST_COUNTER_X + textWidth(str, HUD_SCALE) / 2;
     renderText(str, cx, DUST_COUNTER_Y - (s - HUD_SCALE) * CHARSET_SIZE / 2, ALIGN_CENTER, s);
@@ -699,7 +699,6 @@ const pointerViewportPosition = () => {
 // what else lands here later.
 let titleIndex = 0;
 let titleArmed = false;   // release-then-fresh-press gate so a key/tap held over from reaching TITLE_SCREEN (e.g. backing out of HIGHSCORE_SCREEN) doesn't instantly fire the menu item under the cursor - see processInputs()
-const SEED_LABEL_SCALE = 1.5;   // small corner credit line, not a menu item - see the TITLE_SCREEN render() case
 function titleMenuItems() {
   return [
     { label: 'Start', action: beginTitleJump },
@@ -942,7 +941,7 @@ function endMenuItems() {
 async function shareScore() {
   const data = {
     title: 'Errands of Iris',
-    text: `I dug a ${Math.round(tunnel / PX_PER_M)} meter long shaft and collected ${dust} rainbow dust in Errands of Iris, a game made by @herebefrogs for #js13k 2026`,
+    text: `I dug a ${Math.round(tunnel / PX_PER_M)} meter long shaft and collected ${dust}g of rainbow dust in Errands of Iris, a game made by @herebefrogs for #js13k 2026`,
     url: `https://js13kgames.com/2026/games/errands-of-iris?seed=${runSeed}`,
   };
   if (navigator.canShare) {
@@ -994,9 +993,9 @@ const BUBBLE_MARGIN = 10;    // never let the box itself touch the screen edge, 
 const BUBBLE_LINES = [
   'I have a message to deliver.',
   'Collect dust to grow a',
-  'rainbow bridge.',
+  'rainbow bridge for me.',
   '',
-  isMobile ? 'Swipe to move' : 'Arrow keys/WASD to move',
+  isMobile ? 'Move with swipes' : 'Move with Arrow keys/WASD',
 ];
 function titleBubbleLayout() {
   const titleBottom = HUD_LINE + HUD_SCALE * 2 * CHARSET_SIZE + HUD_LINE;   // title's cap-top + cap-height + a margin
@@ -1851,15 +1850,20 @@ function render() {
           renderText(line, bubble.textX, bubble.y + BUBBLE_PAD + i * BUBBLE_LINE, ALIGN_CENTER, BUBBLE_SCALE, '#000');
         });
       }
-      titleMenuLayout().forEach((item, i) => {
-        if (i === titleIndex) renderText('>', item.chevronX, item.textY, ALIGN_LEFT, TITLE_MENU_SCALE);
-        renderText(item.label, item.labelX, item.textY, ALIGN_LEFT, TITLE_MENU_SCALE);
-      });
-      // js13kgames runs entries in an iframe, hiding the URL bar (and with it
-      // the ?seed= theme joke) - a small permanent corner label keeps it
-      // visible regardless. Small/unobtrusive on purpose: not a menu item,
-      // just a credit line.
-      renderText('Seed: ' + runSeed, HUD_X, CAMERA_HEIGHT - SEED_LABEL_SCALE * CHARSET_SIZE - HUD_X, ALIGN_LEFT, SEED_LABEL_SCALE);
+      {
+        const menu = titleMenuLayout();
+        menu.forEach((item, i) => {
+          if (i === titleIndex) renderText('>', item.chevronX, item.textY, ALIGN_LEFT, TITLE_MENU_SCALE);
+          renderText(item.label, item.labelX, item.textY, ALIGN_LEFT, TITLE_MENU_SCALE);
+        });
+        // js13kgames runs entries in an iframe, hiding the URL bar (and with
+        // it the ?seed= theme joke) - a permanent label under the menu keeps
+        // it visible regardless. Not a menu item (no chevron column), but
+        // same alignment/size as the rows above so it reads as part of the
+        // block rather than a corner credit line.
+        const last = menu[menu.length - 1];
+        renderText('Seed: ' + runSeed, last.labelX, last.textY + TITLE_MENU_ROW, ALIGN_LEFT, TITLE_MENU_SCALE);
+      }
       break;
     case GAME_SCREEN:
       clearBuffer();
